@@ -1,0 +1,17 @@
+<h3 class="page-heading">SignalFx API Connection</h3>
+
+<div class="gf-form-group">
+        <div class="gf-form-inline">
+            <div class="gf-form">
+		        <span class="gf-form-label width-10">Endpoint</span>
+		        <input type="text" class="gf-form-input width-30" ng-model='ctrl.current.url' placeholder="https://stream.signalfx.com" bs-typeahead="{{['https://stream.signalfx.com', 'https://stream.us0.signalfx.com', 'https://stream.us1.signalfx.com', 'https://stream.eu0.signalfx.com']}}" required></input>
+            </div>
+        </div>
+        <div class="gf-form-inline">
+            <div class="gf-form">
+                <span class="gf-form-label width-10">Access Token</span>
+                <input type="text" class="gf-form-input width-30" ng-model='ctrl.current.jsonData.accessToken' placeholder="" required></input>
+            </div>
+        </div>
+    </div>
+</div>
