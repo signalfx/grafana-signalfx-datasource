@@ -3,7 +3,7 @@
 System.register(['lodash', 'moment'], function (_export, _context) {
   "use strict";
 
-  var _, moment, _createClass, MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE, StreamHandler;
+  var _, moment, _createClass, MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE, INACTIVE_JOB_MINUTES, STREAMING_THRESHOLD_MINUTES, StreamHandler;
 
   function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) {
@@ -51,6 +51,8 @@ System.register(['lodash', 'moment'], function (_export, _context) {
       }();
 
       MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE = 1;
+      INACTIVE_JOB_MINUTES = 6;
+      STREAMING_THRESHOLD_MINUTES = 2;
 
       _export('StreamHandler', StreamHandler = function () {
         function StreamHandler(signalflow, templateSrv) {
@@ -63,11 +65,14 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         _createClass(StreamHandler, [{
           key: 'start',
           value: function start(program, aliases, options) {
-            this.promise = defer();
             if (this.isJobReusable(program, options)) {
-              this.initializeTimeRange(options);
-              this.flushData();
+              if (!this.unboundedBatchPhase) {
+                this.promise = defer();
+                this.initializeTimeRange(options);
+                this.flushData();
+              }
             } else {
+              this.promise = defer();
               this.stop();
               this.execute(program, aliases, options);
             }
@@ -76,7 +81,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         }, {
           key: 'isJobReusable',
           value: function isJobReusable(program, options) {
-            return this.handle && this.program == program && this.intervalMs == options.intervalMs && (this.stopTimeRaw == 'now' && this.startTimeRaw == options.rangeRaw.from.valueOf() || this.startTime == options.range.from.valueOf() && this.stopTime == options.range.to.valueOf());
+            return this.handle && this.program == program && this.intervalMs == options.intervalMs && (this.unbounded && this.startTime <= options.range.from.valueOf() || this.startTime <= options.range.from.valueOf() && this.stopTime >= options.range.to.valueOf());
           }
         }, {
           key: 'stop',
@@ -90,6 +95,8 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         }, {
           key: 'execute',
           value: function execute(program, aliases, options) {
+            var _this = this;
+
             console.log('Starting SignalFlow computation: ' + program);
             this.initialize(program, aliases, options);
             var params = {
@@ -107,9 +114,9 @@ System.register(['lodash', 'moment'], function (_export, _context) {
               clearTimeout(this.jobStartTimeout);
             }
             this.jobStartTimeout = setTimeout(function () {
-              console.debug('Job inactive for 6 minutes: ' + program);
-              this.stop();
-            }, 360000);
+              console.debug('Job inactive for ' + INACTIVE_JOB_MINUTES + ' minutes: ' + program);
+              _this.stop();
+            }, INACTIVE_JOB_MINUTES * 60 * 1000);
           }
         }, {
           key: 'initialize',
@@ -122,23 +129,20 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             this.maxDataPoints = options.maxDataPoints;
             this.resolutionMs = options.intervalMs;
             this.maxDelay = 0;
-            this.unbounded = options.rangeRaw.to == 'now';
+            this.unbounded = this.stopTime > Date.now() - STREAMING_THRESHOLD_MINUTES * 60 * 1000;
             this.unboundedBatchPhase = this.unbounded;
-            this.relativeStart = this.startTimeRaw != this.startTime;
-            this.returnedDataPoints = 0;
           }
         }, {
           key: 'initializeTimeRange',
           value: function initializeTimeRange(options) {
             this.startTime = options.range.from.valueOf();
             this.stopTime = options.range.to.valueOf();
-            this.startTimeRaw = options.rangeRaw.from.valueOf();
-            this.stopTimeRaw = options.rangeRaw.to.valueOf();
+            this.cutoffTime = Math.min(Date.now(), this.stopTime);
           }
         }, {
           key: 'handleData',
           value: function handleData(err, data) {
-            var _this = this;
+            var _this2 = this;
 
             if (err) {
               console.debug('Stream error', err);
@@ -165,19 +169,18 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             }
 
             if (this.appendData(data) && this.unboundedBatchPhase) {
+              // Do not flush immediately as some more data may be still received
               if (this.batchPhaseFlushTimeout) {
                 clearTimeout(this.batchPhaseFlushTimeout);
               }
               this.batchPhaseFlushTimeout = setTimeout(function () {
-                return _this.flushData();
-              }, 1000);
+                return _this2.flushData();
+              }, 500);
             }
           }
         }, {
           key: 'appendData',
           value: function appendData(data) {
-            var period = this.stopTime - this.startTime;
-            var slidingWindowStart = data.logicalTimestampMs - period - MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE * this.resolutionMs;
             for (var i = 0; i < data.data.length; i++) {
               var point = data.data[i];
               var datapoints = this.metrics[point.tsId];
@@ -185,13 +188,10 @@ System.register(['lodash', 'moment'], function (_export, _context) {
                 datapoints = [];
                 this.metrics[point.tsId] = datapoints;
               }
-              while (datapoints.length > 0 && this.relativeStart && slidingWindowStart > datapoints[0][1]) {
-                datapoints.shift();
-              }
               datapoints.push([point.value, data.logicalTimestampMs]);
             }
-            var nextAdjustedTime = data.logicalTimestampMs + this.maxDelay + this.resolutionMs;
-            return nextAdjustedTime > this.stopTime;
+            var nextEstimatedTimestamp = data.logicalTimestampMs + this.maxDelay + this.resolutionMs;
+            return nextEstimatedTimestamp > this.cutoffTime;
           }
         }, {
           key: 'flushData',

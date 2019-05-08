@@ -17,6 +17,8 @@ function defer() {
 }
 
 const MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE = 1;
+const INACTIVE_JOB_MINUTES = 6;
+const STREAMING_THRESHOLD_MINUTES = 2;
 
 export class StreamHandler {
 
@@ -26,11 +28,14 @@ export class StreamHandler {
   }
 
   start(program, aliases, options) {
-    this.promise = defer();
     if (this.isJobReusable(program, options)) {
-      this.initializeTimeRange(options);
-      this.flushData();
+      if (!this.unboundedBatchPhase) {
+        this.promise = defer();
+        this.initializeTimeRange(options);
+        this.flushData();
+      }
     } else {
+      this.promise = defer();
       this.stop();
       this.execute(program, aliases, options);
     }
@@ -41,16 +46,16 @@ export class StreamHandler {
     return this.handle
       && this.program == program
       && this.intervalMs == options.intervalMs
-      && ((this.stopTimeRaw == 'now' && this.startTimeRaw == options.rangeRaw.from.valueOf())
-        || (this.startTime == options.range.from.valueOf() && this.stopTime == options.range.to.valueOf()));
+      && ((this.unbounded && this.startTime <= options.range.from.valueOf())
+        || (this.startTime <= options.range.from.valueOf() && this.stopTime >= options.range.to.valueOf()));
   }
 
   stop() {
     if (this.handle) {
-        console.debug('Stopping SignalFlow computation.');
-        this.handle.close();
-        this.handle = null;
-      }
+      console.debug('Stopping SignalFlow computation.');
+      this.handle.close();
+      this.handle = null;
+    }
   }
 
   execute(program, aliases, options) {
@@ -70,10 +75,10 @@ export class StreamHandler {
     if (this.jobStartTimeout) {
       clearTimeout(this.jobStartTimeout);
     }
-    this.jobStartTimeout = setTimeout(function () {
-      console.debug('Job inactive for 6 minutes: ' + program);
+    this.jobStartTimeout = setTimeout(() => {
+      console.debug('Job inactive for ' + INACTIVE_JOB_MINUTES + ' minutes: ' + program);
       this.stop();
-    }, 360000);
+    }, INACTIVE_JOB_MINUTES * 60 * 1000);
   }
 
   initialize(program, aliases, options) {
@@ -85,17 +90,14 @@ export class StreamHandler {
     this.maxDataPoints = options.maxDataPoints;
     this.resolutionMs = options.intervalMs;
     this.maxDelay = 0;
-    this.unbounded = options.rangeRaw.to == 'now';
+    this.unbounded = this.stopTime > Date.now() - STREAMING_THRESHOLD_MINUTES * 60 * 1000;
     this.unboundedBatchPhase = this.unbounded;
-    this.relativeStart = this.startTimeRaw != this.startTime;
-    this.returnedDataPoints = 0;
   }
 
   initializeTimeRange(options) {
     this.startTime = options.range.from.valueOf();
     this.stopTime = options.range.to.valueOf();
-    this.startTimeRaw = options.rangeRaw.from.valueOf();
-    this.stopTimeRaw = options.rangeRaw.to.valueOf();
+    this.cutoffTime = Math.min(Date.now(), this.stopTime);
   }
 
   handleData(err, data) {
@@ -113,7 +115,7 @@ export class StreamHandler {
     if (data.type === 'message' && data.message.messageCode === 'JOB_INITIAL_MAX_DELAY') {
       this.maxDelay = data.message.contents.maxDelayMs;
     }
-    
+
     if (data.type === 'control-message' && data.event === 'END_OF_CHANNEL') {
       this.flushData();
     }
@@ -124,16 +126,15 @@ export class StreamHandler {
     }
 
     if (this.appendData(data) && this.unboundedBatchPhase) {
+      // Do not flush immediately as some more data may be still received
       if (this.batchPhaseFlushTimeout) {
         clearTimeout(this.batchPhaseFlushTimeout);
       }
-      this.batchPhaseFlushTimeout = setTimeout(() => this.flushData(), 1000);
+      this.batchPhaseFlushTimeout = setTimeout(() => this.flushData(), 500);
     }
   }
 
   appendData(data) {
-    var period = (this.stopTime - this.startTime);
-    var slidingWindowStart = data.logicalTimestampMs - period - MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE * this.resolutionMs;
     for (var i = 0; i < data.data.length; i++) {
       var point = data.data[i];
       var datapoints = this.metrics[point.tsId];
@@ -141,13 +142,10 @@ export class StreamHandler {
         datapoints = [];
         this.metrics[point.tsId] = datapoints;
       }
-      while (datapoints.length > 0 && (this.relativeStart && slidingWindowStart > datapoints[0][1])) {
-        datapoints.shift();
-      }
       datapoints.push([point.value, data.logicalTimestampMs]);
     }
-    var nextAdjustedTime = data.logicalTimestampMs + this.maxDelay + this.resolutionMs;
-    return nextAdjustedTime > this.stopTime;
+    var nextEstimatedTimestamp = data.logicalTimestampMs + this.maxDelay + this.resolutionMs;
+    return nextEstimatedTimestamp > this.cutoffTime;
   }
 
   flushData() {
@@ -165,8 +163,8 @@ export class StreamHandler {
         if (minTime == 0 || minTime > datapoints[0][1]) {
           minTime = datapoints[0][1];
         }
-        if (maxTime == 0 || maxTime < datapoints[datapoints.length-1][1]) {
-          maxTime = datapoints[datapoints.length-1][1];
+        if (maxTime == 0 || maxTime < datapoints[datapoints.length - 1][1]) {
+          maxTime = datapoints[datapoints.length - 1][1];
         }
       }
       var tsName = this.getTimeSeriesName(tsId);
@@ -176,7 +174,7 @@ export class StreamHandler {
     seriesList.sort((a, b) => a.id.localeCompare(b.id));
     var data = {
       data: seriesList,
-      range: {from: moment(minTime), to: moment(maxTime)},
+      range: { from: moment(minTime), to: moment(maxTime) },
     };
     this.promise.resolve(data);
     console.debug('Data returned: ' + this.program);
@@ -218,14 +216,14 @@ export class StreamHandler {
     var repr = '';
     var alias = null;
     if (obj.properties['sf_streamLabel']) {
-      tsVars['label'] = { text: obj.properties['sf_streamLabel'] , value: obj.properties['sf_streamLabel']};
+      tsVars['label'] = { text: obj.properties['sf_streamLabel'], value: obj.properties['sf_streamLabel'] };
       repr += obj.properties['sf_streamLabel'] + ':';
       alias = this.aliases[obj.properties['sf_streamLabel']];
     } else {
       alias = _.find(this.aliases, a => true);
     }
     var id = repr + result.join('/');
-    var name = alias ? this.templateSrv.replace(alias, tsVars) : id; 
-    return {id, name};
+    var name = alias ? this.templateSrv.replace(alias, tsVars) : id;
+    return { id, name };
   }
 }
