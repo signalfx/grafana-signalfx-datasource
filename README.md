@@ -16,8 +16,8 @@ The Settings tab in the Data Sources dialog box is shown below. Enter the settin
 |----------------|-------------|
 | _Name_         | The datasource name used in queries and displayed in panels. |
 | _Default_      | Click if you want the datasource name pre-selected for new panels. |
-| _Endpoint_	     | The URL of the SignalFlow API endpoint. |
-| _Access Token_ | The SignalFx API access token. |
+| _Endpoint_	   | The URL of the SignalFlow Streaming Analytics endpoint for your realm. You will find your realm id and this URL on the [My Profile](https://docs.signalfx.com/en/latest/getting-started/get-around-ui.html#profile) page in the SignalFx UI.|
+| _Access Token_ | The SignalFx Access Token (Org Token). See the [SignalFx Developer Guide](https://docs.signalfx.com/en/latest/admin-guide/tokens.html#working-with-access-tokens) for more detail on Access Tokens |
 
 Click __Save and Test__.
 
@@ -49,7 +49,7 @@ Check out the [Templating documentation](https://grafana.com/docs/reference/temp
 
 ### Query Variables
 
-Query variables let you query SignalFx for a list of metrics, tags, property keys, or property values. 
+Query variables let you query SignalFx for a list of metrics, tags, property keys, or property values.
 The SignalFx Datasource Plugin provides the following functions you can use in the Query input field of the Variable edit view.
 
 | Name                                           | Description                                                          |
