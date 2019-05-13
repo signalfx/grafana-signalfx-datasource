@@ -33,18 +33,17 @@ export class SignalFxDatasource {
 
     const aliases = this.collectAliases(options);
 
-    var handler = this.streams[options.panelId];
-    if (handler) {
-      handler.stop();
-    }
-
     // TODO: Better validation can be implemented here 
     if (!program) {
       return Promise.resolve({data: []});
     }
-    handler = new StreamHandler(this.signalflow, program, aliases, options, this.templateSrv);
-    this.streams[options.panelId] = handler;
-    return handler.start();
+
+    var handler = this.streams[options.panelId];
+    if (!handler) {
+      handler = new StreamHandler(this.signalflow, this.templateSrv);
+      this.streams[options.panelId] = handler;
+    }
+    return handler.start(program, aliases, options);
   }
 
   collectAliases(options) {

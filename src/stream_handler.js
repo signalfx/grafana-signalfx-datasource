@@ -1,4 +1,5 @@
 // Copyright (C) 2019 SignalFx, Inc. All rights reserved.
+import _ from "lodash";
 import moment from 'moment';
 
 function defer() {
@@ -15,87 +16,169 @@ function defer() {
   return promise;
 }
 
+const MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE = 1;
+const INACTIVE_JOB_MINUTES = 6;
+const STREAMING_THRESHOLD_MINUTES = 2;
+
 export class StreamHandler {
 
-  constructor(signalflow, program, aliases, options, templateSrv) {
+  constructor(signalflow, templateSrv) {
     this.signalflow = signalflow;
-    this.program = program;
-    this.aliases = aliases;
-    this.options = options;
     this.templateSrv = templateSrv;
-    this.handle = null;
-    this.promise = defer();
   }
 
-  start() {
-    this.metrics = {};
-    console.log('Starting SignalFlow computation: ' + this.program);
-    this.handle = this.signalflow.execute({
-      program: this.program,
-      start: this.options.range.from.valueOf(),
-      resolution: this.options.resolutionMs,
-      stop: this.options.range.to.valueOf(),
-      immediate: true,
-    });
-    this.handle.stream(this.handleData.bind(this));
+  start(program, aliases, options) {
+    if (this.isJobReusable(program, options)) {
+      if (!this.unboundedBatchPhase) {
+        this.promise = defer();
+        this.initializeTimeRange(options);
+        this.flushData();
+      }
+    } else {
+      this.promise = defer();
+      this.stop();
+      this.execute(program, aliases, options);
+    }
     return this.promise;
   }
 
+  isJobReusable(program, options) {
+    return this.handle
+      && this.program == program
+      && this.intervalMs == options.intervalMs
+      && ((this.unbounded && this.startTime <= options.range.from.valueOf())
+        || (this.startTime <= options.range.from.valueOf() && this.stopTime >= options.range.to.valueOf()));
+  }
+
+  stop() {
+    if (this.handle) {
+      console.debug('Stopping SignalFlow computation.');
+      this.handle.close();
+      this.handle = null;
+    }
+  }
+
+  execute(program, aliases, options) {
+    console.log('Starting SignalFlow computation: ' + program);
+    this.initialize(program, aliases, options);
+    var params = {
+      program: this.program,
+      start: this.startTime,
+      resolution: this.intervalMs,
+    };
+    if (!this.unbounded) {
+      params['stop'] = this.stopTime;
+      params['immediate'] = true;
+    }
+    this.handle = this.signalflow.execute(params);
+    this.handle.stream(this.handleData.bind(this));
+    if (this.jobStartTimeout) {
+      clearTimeout(this.jobStartTimeout);
+    }
+    this.jobStartTimeout = setTimeout(() => {
+      console.debug('Job inactive for ' + INACTIVE_JOB_MINUTES + ' minutes: ' + program);
+      this.stop();
+    }, INACTIVE_JOB_MINUTES * 60 * 1000);
+  }
+
+  initialize(program, aliases, options) {
+    this.metrics = {};
+    this.program = program;
+    this.aliases = aliases;
+    this.initializeTimeRange(options);
+    this.intervalMs = options.intervalMs;
+    this.maxDataPoints = options.maxDataPoints;
+    this.resolutionMs = options.intervalMs;
+    this.maxDelay = 0;
+    this.unbounded = this.stopTime > Date.now() - STREAMING_THRESHOLD_MINUTES * 60 * 1000;
+    this.unboundedBatchPhase = this.unbounded;
+  }
+
+  initializeTimeRange(options) {
+    this.startTime = options.range.from.valueOf();
+    this.stopTime = options.range.to.valueOf();
+    this.cutoffTime = Math.min(Date.now(), this.stopTime);
+  }
 
   handleData(err, data) {
-
     if (err) {
-      this.onError(err.message);
+      console.debug('Stream error', err);
+      this.stop();
+      this.promise.reject(err.message);
       return;
     }
 
     if (data.type === 'message' && data.message.messageCode === 'JOB_RUNNING_RESOLUTION') {
-      this.options.resolutionMs = data.message.contents.resolutionMs;
-      console.debug('Original MDP:' + this.options.maxDataPoints);
-      this.options.maxDataPoints = (this.options.range.to.valueOf() - this.options.range.from.valueOf())
-        / data.message.contents.resolutionMs;
-      console.debug('Calculated MDP:' + this.options.maxDataPoints);
+      this.resolutionMs = data.message.contents.resolutionMs;
     }
 
-    if (data.type === 'control-message' && data.event === 'STREAM_START') {
-      var program = this.program;
-      this.streamStartTimeout = setTimeout(function () {
-          console.warn('Long running job detected: ' + program);
-      }, 15000);
+    if (data.type === 'message' && data.message.messageCode === 'JOB_INITIAL_MAX_DELAY') {
+      this.maxDelay = data.message.contents.maxDelayMs;
     }
 
     if (data.type === 'control-message' && data.event === 'END_OF_CHANNEL') {
-      if (this.streamStartTimeout) {
-        clearTimeout(this.streamStartTimeout);
-        this.streamStartTimeout = null;
-      }
       this.flushData();
-      this.onCompleted();
-      return;
     }
 
     if (data.type !== 'data') {
       console.debug(data);
       return;
     }
-    this.appendData(data);
+
+    if (this.appendData(data) && this.unboundedBatchPhase) {
+      // Do not flush immediately as some more data may be still received
+      if (this.batchPhaseFlushTimeout) {
+        clearTimeout(this.batchPhaseFlushTimeout);
+      }
+      this.batchPhaseFlushTimeout = setTimeout(() => this.flushData(), 500);
+    }
   }
 
   appendData(data) {
     for (var i = 0; i < data.data.length; i++) {
       var point = data.data[i];
-      var series = this.metrics[point.tsId];
-      if (!series) {
-        var tsName = this.getTimeSeriesName(point.tsId);
-        series = {target: tsName.name, id: tsName.id, datapoints: []};
-        this.metrics[point.tsId] = series;
+      var datapoints = this.metrics[point.tsId];
+      if (!datapoints) {
+        datapoints = [];
+        this.metrics[point.tsId] = datapoints;
       }
+      datapoints.push([point.value, data.logicalTimestampMs]);
+    }
+    // Estimate an align timestamps to boundaries based on resolution
+    var nextEstimatedTimestamp = data.logicalTimestampMs + (Math.ceil(this.maxDelay / this.resolutionMs) + 1) * this.resolutionMs;
+    return nextEstimatedTimestamp >= Math.floor(this.cutoffTime / this.resolutionMs) * this.resolutionMs;
+  }
 
-      series.datapoints.push([point.value, data.logicalTimestampMs]);
-      if (series.datapoints.length > this.options.maxDataPoints) {
-        series.datapoints.shift();
+  flushData() {
+    this.unboundedBatchPhase = false;
+    var seriesList = [];
+    var minTime = 0;
+    var maxTime = 0;
+    var timeRangeStart = this.startTime - MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE * this.resolutionMs;
+    for (var tsId in this.metrics) {
+      var datapoints = this.metrics[tsId];
+      while (datapoints.length > 0 && timeRangeStart > datapoints[0][1]) {
+        datapoints.shift();
       }
-    }  
+      if (datapoints.length > 0) {
+        if (minTime == 0 || minTime > datapoints[0][1]) {
+          minTime = datapoints[0][1];
+        }
+        if (maxTime == 0 || maxTime < datapoints[datapoints.length - 1][1]) {
+          maxTime = datapoints[datapoints.length - 1][1];
+        }
+      }
+      var tsName = this.getTimeSeriesName(tsId);
+      seriesList.push({ target: tsName.name, id: tsName.id, datapoints: datapoints.slice() });
+    }
+    // Ensure consistent TS order
+    seriesList.sort((a, b) => a.id.localeCompare(b.id));
+    var data = {
+      data: seriesList,
+      range: { from: moment(minTime), to: moment(maxTime) },
+    };
+    this.promise.resolve(data);
+    console.debug('Data returned: ' + this.program);
   }
 
   getTimeSeriesName(tsId) {
@@ -134,47 +217,14 @@ export class StreamHandler {
     var repr = '';
     var alias = null;
     if (obj.properties['sf_streamLabel']) {
-      tsVars['label'] = { text: obj.properties['sf_streamLabel'] , value: obj.properties['sf_streamLabel']};
+      tsVars['label'] = { text: obj.properties['sf_streamLabel'], value: obj.properties['sf_streamLabel'] };
       repr += obj.properties['sf_streamLabel'] + ':';
       alias = this.aliases[obj.properties['sf_streamLabel']];
     } else {
       alias = _.find(this.aliases, a => true);
     }
     var id = repr + result.join('/');
-    var name = alias ? this.templateSrv.replace(alias, tsVars) : id; 
-    return {id, name};
+    var name = alias ? this.templateSrv.replace(alias, tsVars) : id;
+    return { id, name };
   }
-
-  flushData() {
-    var seriesList = [];
-    for (var tsId in this.metrics) {
-      seriesList.push(this.metrics[tsId]);
-    }
-    seriesList.sort((a, b) => a.id.localeCompare(b.id));
-    var start = seriesList.length > 0 ? seriesList[0].datapoints[0][1] : 0;
-    var end = seriesList.length > 0 ? seriesList[0].datapoints[seriesList[0].datapoints.length-1][1] : 0;
-    this.onCompleted({
-      data: seriesList,
-      range: {from: moment(start), to: moment(end)},
-    });
-  }
-
-  onError(error) {
-    console.debug('Stream error', error);
-    this.promise.reject(error);
-  }
-
-  onCompleted(data) {
-    console.debug('Stream completed ' + this.program);
-    this.promise.resolve(data);
-  }
-
-  stop() {
-    if (this.handle) {
-        console.debug('Stopping SignalFlow computation.');
-        this.handle.close();
-        this.handle = null;
-      }
-  }
-
 }

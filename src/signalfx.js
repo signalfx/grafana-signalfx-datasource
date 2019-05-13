@@ -282,7 +282,7 @@
         activeSocket.binaryType = 'arraybuffer';
         activeSocket.onmessage = onWebSocketMessage;
         activeSocket.onopen = function (ev) {
-          activeSocket.send(JSON.stringify({type: 'authenticate', token: authToken}));
+          activeSocket.send(JSON.stringify({type: 'authenticate', userAgent: 'Grafana', token: authToken}));
           wsConnectionOpen = true;
         };
       } else {
