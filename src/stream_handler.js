@@ -144,8 +144,9 @@ export class StreamHandler {
       }
       datapoints.push([point.value, data.logicalTimestampMs]);
     }
-    var nextEstimatedTimestamp = data.logicalTimestampMs + this.maxDelay + this.resolutionMs;
-    return nextEstimatedTimestamp > this.cutoffTime;
+    // Estimate an align timestamps to boundaries based on resolution
+    var nextEstimatedTimestamp = data.logicalTimestampMs + (Math.ceil(this.maxDelay / this.resolutionMs) + 1) * this.resolutionMs;
+    return nextEstimatedTimestamp >= Math.floor(this.cutoffTime / this.resolutionMs) * this.resolutionMs;
   }
 
   flushData() {
