@@ -191,8 +191,8 @@ System.register(['lodash', 'moment'], function (_export, _context) {
               datapoints.push([point.value, data.logicalTimestampMs]);
             }
             // Estimate an align timestamps to boundaries based on resolution
-            var nextEstimatedTimestamp = data.logicalTimestampMs + (Math.ceil(this.maxDelay / this.resolutionMs) + 1) * this.resolutionMs;
-            return nextEstimatedTimestamp >= Math.floor(this.cutoffTime / this.resolutionMs) * this.resolutionMs;
+            var nextEstimatedTimestamp = data.logicalTimestampMs + Math.ceil(this.maxDelay / this.resolutionMs + 1) * this.resolutionMs;
+            return nextEstimatedTimestamp > Math.floor(this.cutoffTime / this.resolutionMs) * this.resolutionMs;
           }
         }, {
           key: 'flushData',
