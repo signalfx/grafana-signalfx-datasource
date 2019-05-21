@@ -1,4 +1,4 @@
-# SignalFX Grafana Datasource Plugin Setup
+# SignalFx Grafana Datasource Plugin Setup
 
 ## Installation
 
