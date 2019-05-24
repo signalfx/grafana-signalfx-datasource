@@ -65,6 +65,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         _createClass(StreamHandler, [{
           key: 'start',
           value: function start(program, aliases, options) {
+            this.aliases = aliases;
             if (this.isJobReusable(program, options)) {
               if (!this.unboundedBatchPhase) {
                 this.promise = defer();
@@ -74,7 +75,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             } else {
               this.promise = defer();
               this.stop();
-              this.execute(program, aliases, options);
+              this.execute(program, options);
             }
             return this.promise;
           }
@@ -94,11 +95,11 @@ System.register(['lodash', 'moment'], function (_export, _context) {
           }
         }, {
           key: 'execute',
-          value: function execute(program, aliases, options) {
+          value: function execute(program, options) {
             var _this = this;
 
             console.log('Starting SignalFlow computation: ' + program);
-            this.initialize(program, aliases, options);
+            this.initialize(program, options);
             var params = {
               program: this.program,
               start: this.startTime,
@@ -120,10 +121,9 @@ System.register(['lodash', 'moment'], function (_export, _context) {
           }
         }, {
           key: 'initialize',
-          value: function initialize(program, aliases, options) {
+          value: function initialize(program, options) {
             this.metrics = {};
             this.program = program;
-            this.aliases = aliases;
             this.initializeTimeRange(options);
             this.intervalMs = options.intervalMs;
             this.maxDataPoints = options.maxDataPoints;

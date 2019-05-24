@@ -28,6 +28,7 @@ export class StreamHandler {
   }
 
   start(program, aliases, options) {
+    this.aliases = aliases;
     if (this.isJobReusable(program, options)) {
       if (!this.unboundedBatchPhase) {
         this.promise = defer();
@@ -37,7 +38,7 @@ export class StreamHandler {
     } else {
       this.promise = defer();
       this.stop();
-      this.execute(program, aliases, options);
+      this.execute(program, options);
     }
     return this.promise;
   }
@@ -58,9 +59,9 @@ export class StreamHandler {
     }
   }
 
-  execute(program, aliases, options) {
+  execute(program, options) {
     console.log('Starting SignalFlow computation: ' + program);
-    this.initialize(program, aliases, options);
+    this.initialize(program, options);
     var params = {
       program: this.program,
       start: this.startTime,
@@ -81,10 +82,9 @@ export class StreamHandler {
     }, INACTIVE_JOB_MINUTES * 60 * 1000);
   }
 
-  initialize(program, aliases, options) {
+  initialize(program, options) {
     this.metrics = {};
     this.program = program;
-    this.aliases = aliases;
     this.initializeTimeRange(options);
     this.intervalMs = options.intervalMs;
     this.maxDataPoints = options.maxDataPoints;
