@@ -9,7 +9,9 @@
 
   "metrics": true,
   "annotations": false,
-
+  "backend": true,
+  "alerting": true,
+  "executable": "signalfx-plugin",
   "info": {
     "description": "SignalFx Datasource",
     "author": {
