@@ -77,12 +77,26 @@ System.register(['lodash', 'moment'], function (_export, _context) {
               this.stop();
               this.execute(program, options);
             }
+            this.setCleanupTask();
             return this.promise;
           }
         }, {
           key: 'isJobReusable',
           value: function isJobReusable(program, options) {
-            return this.handle && this.program == program && this.intervalMs == options.intervalMs && (this.unbounded && this.startTime <= options.range.from.valueOf() || this.startTime <= options.range.from.valueOf() && this.stopTime >= options.range.to.valueOf());
+            return this.program == program && this.intervalMs == options.intervalMs && this.startTime <= options.range.from.valueOf() && (this.unbounded && this.handle || this.stopTime >= options.range.to.valueOf());
+          }
+        }, {
+          key: 'setCleanupTask',
+          value: function setCleanupTask() {
+            var _this = this;
+
+            if (this.jobStartTimeout) {
+              clearTimeout(this.jobStartTimeout);
+            }
+            this.jobStartTimeout = setTimeout(function () {
+              console.debug('Job inactive for ' + INACTIVE_JOB_MINUTES + ' minutes: ' + program);
+              _this.stop();
+            }, INACTIVE_JOB_MINUTES * 60 * 1000);
           }
         }, {
           key: 'stop',
@@ -96,8 +110,6 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         }, {
           key: 'execute',
           value: function execute(program, options) {
-            var _this = this;
-
             console.log('Starting SignalFlow computation: ' + program);
             this.initialize(program, options);
             var params = {
@@ -111,13 +123,6 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             }
             this.handle = this.signalflow.execute(params);
             this.handle.stream(this.handleData.bind(this));
-            if (this.jobStartTimeout) {
-              clearTimeout(this.jobStartTimeout);
-            }
-            this.jobStartTimeout = setTimeout(function () {
-              console.debug('Job inactive for ' + INACTIVE_JOB_MINUTES + ' minutes: ' + program);
-              _this.stop();
-            }, INACTIVE_JOB_MINUTES * 60 * 1000);
           }
         }, {
           key: 'initialize',
@@ -159,8 +164,9 @@ System.register(['lodash', 'moment'], function (_export, _context) {
               this.maxDelay = data.message.contents.maxDelayMs;
             }
 
-            if (data.type === 'control-message' && data.event === 'END_OF_CHANNEL') {
+            if (data.type === 'control-message' && (data.event === 'END_OF_CHANNEL' || data.event === 'CHANNEL_ABORT')) {
               this.flushData();
+              this.stop();
             }
 
             if (data.type !== 'data') {

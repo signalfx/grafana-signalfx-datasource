@@ -40,15 +40,25 @@ export class StreamHandler {
       this.stop();
       this.execute(program, options);
     }
+    this.setCleanupTask();
     return this.promise;
   }
 
   isJobReusable(program, options) {
-    return this.handle
-      && this.program == program
+    return this.program == program
       && this.intervalMs == options.intervalMs
-      && ((this.unbounded && this.startTime <= options.range.from.valueOf())
-        || (this.startTime <= options.range.from.valueOf() && this.stopTime >= options.range.to.valueOf()));
+      && this.startTime <= options.range.from.valueOf()
+      && ((this.unbounded && this.handle) || this.stopTime >= options.range.to.valueOf());
+  }
+
+  setCleanupTask() {
+    if (this.jobStartTimeout) {
+      clearTimeout(this.jobStartTimeout);
+    }
+    this.jobStartTimeout = setTimeout(() => {
+      console.debug('Job inactive for ' + INACTIVE_JOB_MINUTES + ' minutes: ' + program);
+      this.stop();
+    }, INACTIVE_JOB_MINUTES * 60 * 1000);
   }
 
   stop() {
@@ -73,13 +83,6 @@ export class StreamHandler {
     }
     this.handle = this.signalflow.execute(params);
     this.handle.stream(this.handleData.bind(this));
-    if (this.jobStartTimeout) {
-      clearTimeout(this.jobStartTimeout);
-    }
-    this.jobStartTimeout = setTimeout(() => {
-      console.debug('Job inactive for ' + INACTIVE_JOB_MINUTES + ' minutes: ' + program);
-      this.stop();
-    }, INACTIVE_JOB_MINUTES * 60 * 1000);
   }
 
   initialize(program, options) {
@@ -116,8 +119,9 @@ export class StreamHandler {
       this.maxDelay = data.message.contents.maxDelayMs;
     }
 
-    if (data.type === 'control-message' && data.event === 'END_OF_CHANNEL') {
+    if (data.type === 'control-message' && (data.event === 'END_OF_CHANNEL' || data.event === 'CHANNEL_ABORT')) {
       this.flushData();
+      this.stop();
     }
 
     if (data.type !== 'data') {
