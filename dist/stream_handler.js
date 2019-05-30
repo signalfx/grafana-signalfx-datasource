@@ -83,7 +83,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         }, {
           key: 'isJobReusable',
           value: function isJobReusable(program, options) {
-            return this.program == program && this.intervalMs == options.intervalMs && this.startTime <= options.range.from.valueOf() && (this.unbounded && this.handle || this.stopTime >= options.range.to.valueOf());
+            return this.program == program && this.intervalMs == options.intervalMs && this.startTime <= options.range.from.valueOf() && (this.unbounded && this.running || this.stopTime >= options.range.to.valueOf());
           }
         }, {
           key: 'setupCleanupTask',
@@ -101,10 +101,10 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         }, {
           key: 'stop',
           value: function stop() {
-            if (this.handle) {
+            if (this.open) {
               console.debug('Stopping SignalFlow computation.');
               this.handle.close();
-              this.handle = null;
+              this.running = false;
             }
           }
         }, {
@@ -122,6 +122,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
               params['immediate'] = true;
             }
             this.handle = this.signalflow.execute(params);
+            this.running = true;
             this.handle.stream(this.handleData.bind(this));
           }
         }, {
