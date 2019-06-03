@@ -29,12 +29,26 @@ type DatasourceInfo struct {
 }
 
 type Target struct {
-	RefId      string
-	Program    string
-	StartTime  int64
-	StopTime   int64
-	IntervalMs int64
-	Alias      string
+	RefID       string        `json:"refId"`
+	Program     string        `json:"program"`
+	StartTime   time.Time     `json:"-"`
+	StartTimeMs int64         `json:"startTime"`
+	StopTime    time.Time     `json:"-"`
+	StopTimeMs  int64         `json:"stopTime"`
+	Interval    time.Duration `json:"-"`
+	IntervalMs  int64         `json:"intervalMs"`
+	Alias       string        `json:"alias"`
+}
+
+func (t *Target) UnmarshalJSON(b []byte) error {
+	type alias Target
+	if err := json.Unmarshal(b, (*alias)(t)); err != nil {
+		return err
+	}
+	t.StartTime = time.Unix(0, t.StartTimeMs*int64(time.Millisecond))
+	t.StopTime = time.Unix(0, t.StopTimeMs*int64(time.Millisecond))
+	t.Interval = time.Duration(t.IntervalMs) * time.Millisecond
+	return nil
 }
 
 func NewSignalFxDatasource() *SignalFxDatasource {
@@ -74,7 +88,7 @@ func (t *SignalFxDatasource) Query(ctx context.Context, tsdbReq *datasource.Data
 		}
 		s := <-ch
 		result := &datasource.QueryResult{
-			RefId:  target.RefId,
+			RefId:  target.RefID,
 			Series: s,
 		}
 		response.Results = append(response.Results, result)
@@ -97,6 +111,7 @@ func (t *SignalFxDatasource) createClient(datasource *datasource.DatasourceInfo)
 	token := dsInfo.AccessToken
 
 	t.clientMutex.Lock()
+	defer t.clientMutex.Unlock()
 	// Remove existing client if configuration changes
 	if t.client != nil && (t.url != url || t.token != token) {
 		t.client.Close()
@@ -106,9 +121,9 @@ func (t *SignalFxDatasource) createClient(datasource *datasource.DatasourceInfo)
 	if t.client == nil {
 		c, err := signalflow.NewClient(
 			signalflow.StreamURL(url),
-			signalflow.AccessToken(dsInfo.AccessToken))
+			signalflow.AccessToken(dsInfo.AccessToken),
+			signalflow.UserAgent("grafana"))
 		if err != nil {
-			t.clientMutex.Unlock()
 			return err
 		}
 		t.client = c
@@ -116,7 +131,6 @@ func (t *SignalFxDatasource) createClient(datasource *datasource.DatasourceInfo)
 		t.token = token
 	}
 
-	t.clientMutex.Unlock()
 	return nil
 }
 
@@ -125,7 +139,11 @@ func (t *SignalFxDatasource) buildURL(datasourceInfo *datasource.DatasourceInfo)
 	if err != nil {
 		return "", err
 	}
-	return "wss://" + sfxURL.Host + "/v2/signalflow", nil
+	scheme := "wss"
+	if sfxURL.Scheme == "http" || sfxURL.Scheme == "" {
+		scheme = "ws"
+	}
+	return scheme + "://" + sfxURL.Host + "/v2/signalflow", nil
 }
 
 func (t *SignalFxDatasource) getDsInfo(datasourceInfo *datasource.DatasourceInfo) (*DatasourceInfo, error) {
@@ -160,15 +178,15 @@ func (t *SignalFxDatasource) startJobHandler(target Target) (chan []*datasource.
 }
 
 func (t *SignalFxDatasource) buildTargets(tsdbReq *datasource.DatasourceRequest) ([]Target, error) {
-	startTime := tsdbReq.TimeRange.FromEpochMs
-	stopTime := tsdbReq.TimeRange.ToEpochMs
+	startTime := time.Unix(0, tsdbReq.TimeRange.FromEpochMs*int64(time.Millisecond))
+	stopTime := time.Unix(0, tsdbReq.TimeRange.ToEpochMs*int64(time.Millisecond))
 	targets := make([]Target, 0)
 	for _, query := range tsdbReq.Queries {
 		target := Target{}
 		if err := json.Unmarshal([]byte(query.ModelJson), &target); err != nil {
 			return nil, err
 		}
-		target.IntervalMs = query.IntervalMs
+		target.Interval = time.Duration(query.IntervalMs) * time.Millisecond
 		target.StartTime = startTime
 		target.StopTime = stopTime
 		targets = append(targets, target)
