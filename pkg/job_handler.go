@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"time"
 
 	"github.com/grafana/grafana_plugin_model/go/datasource"
@@ -107,8 +106,8 @@ func (t *SignalFxJobHandler) reuse(target *Target) (chan []*datasource.TimeSerie
 func (t *SignalFxJobHandler) isJobReusable(target *Target) bool {
 	return t.program == target.Program &&
 		t.interval == target.Interval &&
-		t.startTime.Before(target.StartTime) &&
-		((t.computation != nil && t.unbounded) || t.stopTime.After(target.StopTime))
+		!t.startTime.After(target.StartTime) &&
+		((t.computation != nil && t.unbounded) || !t.stopTime.Before(target.StopTime))
 }
 
 func (t *SignalFxJobHandler) updateLastUsed() {
@@ -148,7 +147,7 @@ func (t *SignalFxJobHandler) handleDataMessage(m *messages.DataMessage) bool {
 	if resolution > 0 {
 		maxDelay := t.computation.MaxDelay()
 		// Estimate the timestamp of the last datapoint already available in the system
-		nextEstimatedTimestamp := timestamp.Add(resolution + maxDelay)
+		nextEstimatedTimestamp := timestamp.Add(2*resolution - 1).Add(maxDelay).Truncate(resolution)
 		roundedCutoffTime := t.cutoffTime.Truncate(resolution)
 		return nextEstimatedTimestamp.After(roundedCutoffTime)
 	}
@@ -166,10 +165,6 @@ func toFloat64(value interface{}) float64 {
 	default:
 		return 0.0
 	}
-}
-
-func (t *SignalFxJobHandler) handleMetadataMessage(m *messages.MetadataMessage) {
-	log.Printf("Meta: %v", m)
 }
 
 func (t *SignalFxJobHandler) stop() {
