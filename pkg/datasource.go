@@ -156,11 +156,11 @@ func (t *SignalFxDatasource) getDsInfo(datasourceInfo *datasource.DatasourceInfo
 
 func (t *SignalFxDatasource) startJobHandler(target Target) (chan []*datasource.TimeSeries, error) {
 	t.handlerMutex.Lock()
+	defer t.handlerMutex.Unlock()
 	// Try to re-use any existing job if possible
 	for _, h := range t.handlers {
 		ch, _ := h.reuse(&target)
 		if ch != nil {
-			t.handlerMutex.Unlock()
 			return ch, nil
 		}
 	}
@@ -173,7 +173,6 @@ func (t *SignalFxDatasource) startJobHandler(target Target) (chan []*datasource.
 	if ch != nil {
 		t.handlers = append(t.handlers, handler)
 	}
-	t.handlerMutex.Unlock()
 	return ch, err
 }
 
