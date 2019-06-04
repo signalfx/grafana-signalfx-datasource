@@ -7,7 +7,9 @@ module.exports = function(grunt) {
 
   grunt.initConfig({
 
-    clean: ["dist"],
+    clean: {
+		dist: ["dist/*", "!dist/signalfx-plugin_*"],
+	},
 
     copy: {
       src_to_dist: {

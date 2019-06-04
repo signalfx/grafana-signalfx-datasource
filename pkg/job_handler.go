@@ -1,39 +1,34 @@
 package main
 
 import (
-	"fmt"
-	"log"
-	"math"
-	"strconv"
 	"time"
 
 	"github.com/grafana/grafana_plugin_model/go/datasource"
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/signalfx/signalfx-go/signalflow"
+	"github.com/signalfx/signalfx-go/signalflow/messages"
 )
 
 type SignalFxJobHandler struct {
-	logger     hclog.Logger
-	client     *signalflow.Client
-	channel    *signalflow.Channel
-	batchOut   chan []*datasource.TimeSeries
-	program    string
-	maxDelay   int64
-	intervalMs int64
-	resolution int64
-	startTime  int64
-	stopTime   int64
-	cutoffTime int64
-	unbounded  bool
-	running    bool
-	lastUsed   time.Time
-	Points     map[int64]([]*datasource.Point)
-	Meta       map[string]interface{}
+	logger      hclog.Logger
+	client      *signalflow.Client
+	computation *signalflow.Computation
+	batchOut    chan []*datasource.TimeSeries
+	program     string
+	interval    time.Duration
+	startTime   time.Time
+	stopTime    time.Time
+	cutoffTime  time.Time
+	unbounded   bool
+	running     bool
+	lastUsed    time.Time
+	Points      map[int64]([]*datasource.Point)
+	Meta        map[string]interface{}
 }
 
-const streamingThresholdMinutes = 2
+const streamingThresholdTimeout = 2 * time.Minute
 const maxDatapointsToKeepBeforeTimerange = 1
-const inactiveJobMinutes int64 = 6
+const inactiveJobTimeout = 6 * time.Minute
 
 func (t *SignalFxJobHandler) start(target *Target) (chan []*datasource.TimeSeries, error) {
 	// if t.running != nil {
@@ -41,14 +36,15 @@ func (t *SignalFxJobHandler) start(target *Target) (chan []*datasource.TimeSerie
 	// }
 	t.batchOut = make(chan []*datasource.TimeSeries, 1)
 	t.initialize(target)
-	ch, err := t.execute()
+	comp, err := t.execute()
 	if err != nil {
 		t.logger.Error("Could not execute request", "error", err)
 		return nil, err
 	}
-	t.channel = ch
+	t.computation = comp
 	t.running = true
-	go t.readMessages()
+
+	go t.readDataMessages()
 	t.updateLastUsed()
 	return t.batchOut, nil
 }
@@ -57,20 +53,18 @@ func (t *SignalFxJobHandler) initialize(target *Target) {
 	t.Points = make(map[int64]([]*datasource.Point))
 	t.program = target.Program
 	t.initializeTimeRange(target)
-	t.intervalMs = target.IntervalMs
-	t.resolution = 0
-	t.maxDelay = 0
-	t.unbounded = target.StopTime > currentTimeMillis()-streamingThresholdMinutes*60*1000
+	t.interval = target.Interval
+	t.unbounded = target.StopTime.After(time.Now().Add(-streamingThresholdTimeout))
 }
 
 func (t *SignalFxJobHandler) initializeTimeRange(target *Target) {
 	t.startTime = target.StartTime
 	t.stopTime = target.StopTime
-	t.cutoffTime = min(currentTimeMillis(), t.stopTime)
-}
-
-func currentTimeMillis() int64 {
-	return time.Now().UnixNano() / 1e6
+	t.cutoffTime = t.stopTime
+	now := time.Now()
+	if t.stopTime.After(now) {
+		t.cutoffTime = now
+	}
 }
 
 func min(x, y int64) int64 {
@@ -80,13 +74,13 @@ func min(x, y int64) int64 {
 	return x
 }
 
-func (t *SignalFxJobHandler) execute() (*signalflow.Channel, error) {
+func (t *SignalFxJobHandler) execute() (*signalflow.Computation, error) {
 	request := &signalflow.ExecuteRequest{
 		Program: t.program,
 		Start:   t.startTime,
 	}
-	if t.intervalMs > 0 {
-		request.Resolution = int32(t.intervalMs)
+	if t.interval > 0 {
+		request.Resolution = t.interval
 	}
 	if !t.unbounded {
 		request.Stop = t.stopTime
@@ -111,58 +105,51 @@ func (t *SignalFxJobHandler) reuse(target *Target) (chan []*datasource.TimeSerie
 
 func (t *SignalFxJobHandler) isJobReusable(target *Target) bool {
 	return t.program == target.Program &&
-		t.intervalMs == target.IntervalMs &&
-		t.startTime <= target.StartTime &&
-		((t.channel != nil && t.unbounded) || t.stopTime >= target.StopTime)
+		t.interval == target.Interval &&
+		!t.startTime.After(target.StartTime) &&
+		((t.computation != nil && t.unbounded) || !t.stopTime.Before(target.StopTime))
 }
 
 func (t *SignalFxJobHandler) updateLastUsed() {
 	t.lastUsed = time.Now()
 }
 
-func (t *SignalFxJobHandler) readMessages() {
-	for msg := range t.channel.Messages() {
-		if dm, ok := msg.(*signalflow.DataMessage); ok {
+func (t *SignalFxJobHandler) readDataMessages() {
+	for {
+		select {
+		// This channel receives when there is no more data
+		case <-t.computation.Done():
+			t.flushData(t.batchOut)
+			t.stop()
+			return
+		case dm := <-t.computation.Data():
 			if t.handleDataMessage(dm) {
 				t.flushData(t.batchOut)
 			}
-		} else if m, ok := msg.(*signalflow.BaseControlMessage); ok {
-			if t.handleControlMessage(m) {
-				break
-			}
-		} else if m, ok := msg.(*signalflow.MessageMessage); ok {
-			t.handleMessageMessage(m)
-		} else if m, ok := msg.(*signalflow.MetadataMessage); ok {
-			t.handleMetadataMessage(m)
-		} else if m, ok := msg.(*signalflow.WebsocketErrorMessage); ok {
-			t.handleErrorMessage(m)
-			break
-		} else {
-			log.Printf("Message Type: %v %v", msg.Type(), msg)
 		}
 	}
-	t.flushData(t.batchOut)
-	t.stop()
 }
 
-func (t *SignalFxJobHandler) handleDataMessage(m *signalflow.DataMessage) bool {
-	var timestamp = int64(m.TimestampMillis)
+func (t *SignalFxJobHandler) handleDataMessage(m *messages.DataMessage) bool {
+	timestamp := time.Unix(0, int64(m.TimestampMillis)*int64(time.Millisecond))
 	for _, pl := range m.Payloads {
-		tsid := pl.Tsid
+		tsid := int64(pl.TSID)
 		value := pl.Value()
 		if (t.Points[tsid]) == nil {
 			t.Points[tsid] = make([]*datasource.Point, 0)
 		}
 		t.Points[tsid] = append(t.Points[tsid], &datasource.Point{
-			Timestamp: int64(timestamp),
+			Timestamp: timestamp.UnixNano() / int64(time.Millisecond),
 			Value:     toFloat64(value),
 		})
 	}
-	if t.resolution > 0 {
+	resolution := t.computation.Resolution()
+	if resolution > 0 {
+		maxDelay := t.computation.MaxDelay()
 		// Estimate the timestamp of the last datapoint already available in the system
-		nextEstimatedTimestamp := timestamp + int64(math.Ceil(float64(t.maxDelay)/float64(t.resolution)+1))*t.resolution
-		roundedCutoffTime := int64(math.Floor(float64(t.cutoffTime)/float64(t.resolution))) * t.resolution
-		return nextEstimatedTimestamp > roundedCutoffTime
+		nextEstimatedTimestamp := timestamp.Add(2*resolution - 1).Add(maxDelay).Truncate(resolution)
+		roundedCutoffTime := t.cutoffTime.Truncate(resolution)
+		return nextEstimatedTimestamp.After(roundedCutoffTime)
 	}
 	return false
 }
@@ -180,42 +167,10 @@ func toFloat64(value interface{}) float64 {
 	}
 }
 
-func (t *SignalFxJobHandler) handleControlMessage(m *signalflow.BaseControlMessage) bool {
-	log.Printf("Event: %v", m.Event)
-	switch m.Event {
-	case "END_OF_CHANNEL", "CHANNEL_ABORT":
-		return true
-	}
-	return false
-}
-
-func (t *SignalFxJobHandler) handleMessageMessage(m *signalflow.MessageMessage) {
-	switch m.MessageBlock.Code {
-	case "JOB_RUNNING_RESOLUTION":
-		n, _ := strconv.ParseInt(fmt.Sprintf("%v", m.MessageBlock.Contents["resolutionMs"]), 10, 64)
-		t.resolution = n
-		t.logger.Debug("Resolution", "value", t.resolution)
-	case "JOB_INITIAL_MAX_DELAY":
-		n, _ := strconv.ParseInt(fmt.Sprintf("%v", m.MessageBlock.Contents["maxDelayMs"]), 10, 64)
-		t.maxDelay = n
-		t.logger.Debug("Max Delay", "value", t.resolution)
-	default:
-		log.Printf("Message: %v", m.MessageBlock)
-	}
-}
-
-func (t *SignalFxJobHandler) handleMetadataMessage(m *signalflow.MetadataMessage) {
-	log.Printf("Meta: %v", m)
-}
-
-func (t *SignalFxJobHandler) handleErrorMessage(m *signalflow.WebsocketErrorMessage) {
-	t.logger.Error("Error", "error", m.Error)
-}
-
 func (t *SignalFxJobHandler) stop() {
 	if t.running {
 		t.logger.Debug("Stopping job", "program", t.program)
-		t.channel.Close()
+		t.computation.Stop()
 		t.running = false
 	}
 }
@@ -244,15 +199,15 @@ func (t *SignalFxJobHandler) getTimeSeriesName(tsid int64) string {
 }
 
 func (t *SignalFxJobHandler) trimDatapoints() {
-	trimTimestamp := t.startTime - maxDatapointsToKeepBeforeTimerange*t.resolution
+	trimTimestamp := t.startTime.Add(-time.Duration(maxDatapointsToKeepBeforeTimerange * int64(t.computation.Resolution())))
 	for tsid, ss := range t.Points {
-		for len(ss) > 0 && trimTimestamp > ss[0].Timestamp {
+		for len(ss) > 0 && trimTimestamp.After(time.Unix(0, ss[0].Timestamp*int64(time.Millisecond))) {
 			ss = ss[1:]
 		}
 		t.Points[tsid] = ss
 	}
 }
 
-func (t *SignalFxJobHandler) isActive(time time.Time) bool {
-	return time.UnixNano() < t.lastUsed.UnixNano()+inactiveJobMinutes*60*1e9
+func (t *SignalFxJobHandler) isActive(now time.Time) bool {
+	return now.Before(t.lastUsed.Add(inactiveJobTimeout))
 }
