@@ -15,6 +15,4 @@ package-lock.json
 yarn.lock
 Gopkg.lock
 
-dist/
-
 /vendor
