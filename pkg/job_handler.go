@@ -5,6 +5,7 @@ import (
 
 	"github.com/grafana/grafana_plugin_model/go/datasource"
 	hclog "github.com/hashicorp/go-hclog"
+	"github.com/signalfx/signalfx-go/idtool"
 	"github.com/signalfx/signalfx-go/signalflow"
 	"github.com/signalfx/signalfx-go/signalflow/messages"
 )
@@ -121,6 +122,9 @@ func (t *SignalFxJobHandler) readDataMessages() {
 		case <-t.computation.Done():
 			t.flushData(t.batchOut)
 			t.stop()
+			if err := t.computation.Err(); err != nil {
+				t.logger.Error("SignalFlow computation failed", "error", err)
+			}
 			return
 		case dm := <-t.computation.Data():
 			if t.handleDataMessage(dm) {
@@ -187,14 +191,23 @@ func (t *SignalFxJobHandler) flushData(out chan []*datasource.TimeSeries) {
 func (t *SignalFxJobHandler) convertToTimeseries() []*datasource.TimeSeries {
 	series := make([]*datasource.TimeSeries, 0)
 	for id, points := range t.Points {
-		s := &datasource.TimeSeries{Name: t.getTimeSeriesName(id), Points: points}
+		s := &datasource.TimeSeries{Name: t.getTimeSeriesName(idtool.ID(id)), Points: points}
 		series = append(series, s)
 	}
 	return series
 }
 
 // TODO: Use metadata to map tsid onto some meaningful name
-func (t *SignalFxJobHandler) getTimeSeriesName(tsid int64) string {
+func (t *SignalFxJobHandler) getTimeSeriesName(tsid idtool.ID) string {
+	if t.computation != nil {
+		meta := t.computation.TSIDMetadata(tsid)
+		if meta != nil {
+			if meta.OriginatingMetric != "" {
+				return meta.OriginatingMetric
+			}
+			return meta.Metric
+		}
+	}
 	return "series_name"
 }
 
