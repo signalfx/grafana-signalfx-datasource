@@ -103,7 +103,8 @@ func (t *SignalFxJobHandler) isJobReusable(target *Target) bool {
 	return t.program == target.Program &&
 		t.interval == target.Interval &&
 		!t.startTime.After(target.StartTime) &&
-		((t.computation != nil && t.unbounded) || !t.stopTime.Before(target.StopTime))
+		((t.computation != nil && !t.computation.IsFinished() && t.unbounded) ||
+			!t.stopTime.Before(target.StopTime))
 }
 
 func (t *SignalFxJobHandler) updateLastUsed() {
