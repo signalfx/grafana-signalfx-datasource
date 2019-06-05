@@ -21,7 +21,6 @@ type SignalFxJobHandler struct {
 	stopTime    time.Time
 	cutoffTime  time.Time
 	unbounded   bool
-	running     bool
 	lastUsed    time.Time
 	Points      map[int64]([]*datasource.Point)
 	Meta        map[string]interface{}
@@ -32,9 +31,6 @@ const maxDatapointsToKeepBeforeTimerange = 1
 const inactiveJobTimeout = 6 * time.Minute
 
 func (t *SignalFxJobHandler) start(target *Target) (chan []*datasource.TimeSeries, error) {
-	// if t.running != nil {
-	// 	return nil, Errors.new("Handler already running")
-	// }
 	t.batchOut = make(chan []*datasource.TimeSeries, 1)
 	t.initialize(target)
 	comp, err := t.execute()
@@ -43,7 +39,6 @@ func (t *SignalFxJobHandler) start(target *Target) (chan []*datasource.TimeSerie
 		return nil, err
 	}
 	t.computation = comp
-	t.running = true
 
 	go t.readDataMessages()
 	t.updateLastUsed()
@@ -172,11 +167,8 @@ func toFloat64(value interface{}) float64 {
 }
 
 func (t *SignalFxJobHandler) stop() {
-	if t.running {
-		t.logger.Debug("Stopping job", "program", t.program)
-		t.computation.Stop()
-		t.running = false
-	}
+	t.logger.Debug("Stopping job", "program", t.program)
+	t.computation.Stop()
 }
 
 func (t *SignalFxJobHandler) flushData(out chan []*datasource.TimeSeries) {
