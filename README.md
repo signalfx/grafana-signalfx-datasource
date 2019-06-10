@@ -69,3 +69,7 @@ A = data('[[var_consul_metric]]', filter=filter('[[var_consul_property]]', '[[va
 ```
 A = data('Latency', filter=filter('stat', 'mean'), rollup='latest').$aggregation().publish(label='A')
 ```
+
+## Building from source
+
+Run `make clean dist` to build the plugin from scratch.
