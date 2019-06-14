@@ -10,10 +10,32 @@ import (
 	"github.com/signalfx/signalfx-go/signalflow/messages"
 )
 
+type SignalflowClient interface {
+	Execute(req *signalflow.ExecuteRequest) (*signalflow.Computation, error)
+}
+
+type SignalflowComputation interface {
+	Data() <-chan *messages.DataMessage
+	MaxDelay() time.Duration
+	Resolution() time.Duration
+	TSIDMetadata(tsid idtool.ID) *messages.MetadataProperties
+	IsFinished() bool
+	Done() <-chan struct{}
+	Err() error
+	Stop() error
+}
+
+type SignalFxJob interface {
+	stop()
+	Program() string
+	isActive(time time.Time) bool
+	reuse(target *Target) <-chan []*datasource.TimeSeries
+}
+
 type SignalFxJobHandler struct {
 	logger      hclog.Logger
-	client      *signalflow.Client
-	computation *signalflow.Computation
+	client      SignalflowClient
+	computation SignalflowComputation
 	batchOut    chan []*datasource.TimeSeries
 	program     string
 	interval    time.Duration
@@ -30,7 +52,7 @@ const streamingThresholdTimeout = 2 * time.Minute
 const maxDatapointsToKeepBeforeTimerange = 1
 const inactiveJobTimeout = 6 * time.Minute
 
-func (t *SignalFxJobHandler) start(target *Target) (chan []*datasource.TimeSeries, error) {
+func (t *SignalFxJobHandler) start(target *Target) (<-chan []*datasource.TimeSeries, error) {
 	t.batchOut = make(chan []*datasource.TimeSeries, 1)
 	t.initialize(target)
 	comp, err := t.execute()
@@ -86,7 +108,7 @@ func (t *SignalFxJobHandler) execute() (*signalflow.Computation, error) {
 	return t.client.Execute(request)
 }
 
-func (t *SignalFxJobHandler) reuse(target *Target) (chan []*datasource.TimeSeries, error) {
+func (t *SignalFxJobHandler) reuse(target *Target) <-chan []*datasource.TimeSeries {
 	// Re-use this handler only if it has already processed the initial request
 	// so that enough data is collected in the buffer and we can return it immediately
 	if t.isJobReusable(target) && t.batchOut == nil {
@@ -94,9 +116,9 @@ func (t *SignalFxJobHandler) reuse(target *Target) (chan []*datasource.TimeSerie
 		out := make(chan []*datasource.TimeSeries, 1)
 		t.flushData(out)
 		t.updateLastUsed()
-		return out, nil
+		return out
 	}
-	return nil, nil
+	return nil
 }
 
 func (t *SignalFxJobHandler) isJobReusable(target *Target) bool {
@@ -190,7 +212,6 @@ func (t *SignalFxJobHandler) convertToTimeseries() []*datasource.TimeSeries {
 	return series
 }
 
-// TODO: Use metadata to map tsid onto some meaningful name
 func (t *SignalFxJobHandler) getTimeSeriesName(tsid idtool.ID) string {
 	if t.computation != nil {
 		meta := t.computation.TSIDMetadata(tsid)
@@ -216,4 +237,8 @@ func (t *SignalFxJobHandler) trimDatapoints() {
 
 func (t *SignalFxJobHandler) isActive(now time.Time) bool {
 	return now.Before(t.lastUsed.Add(inactiveJobTimeout))
+}
+
+func (t *SignalFxJobHandler) Program() string {
+	return t.program
 }
