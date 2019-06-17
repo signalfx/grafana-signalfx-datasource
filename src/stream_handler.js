@@ -62,7 +62,7 @@ export class StreamHandler {
   }
 
   stop() {
-    if (this.open) {
+    if (this.running) {
       console.debug('Stopping SignalFlow computation.');
       this.handle.close();
       this.running = false;
@@ -189,7 +189,7 @@ export class StreamHandler {
   getTimeSeriesName(tsId) {
     var obj = this.handle.get_metadata(tsId);
     if (!obj) {
-      return tsId;
+      return { id: tsId, name: tsId };
     }
 
     var candidates = ['sf_metric', 'sf_originatingMetric'];
