@@ -7,4 +7,6 @@ RUN apt-get update && \
 
 FROM grafana/grafana:6.2.2
 
-COPY --from=builder --chown=472:472 /plugin/grafana-signalfx-datasource-54ae9757471febd62fc18af3112921ab328cd300/dist/ /var/lib/grafana/plugins/signalfx-datasource
+ENV GF_PATHS_PLUGINS=/opt/grafana-plugins
+
+COPY --from=builder --chown=472:472 /plugin/grafana-signalfx-datasource-54ae9757471febd62fc18af3112921ab328cd300/dist/ /opt/grafana-plugins/signalfx-datasource
