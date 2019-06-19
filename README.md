@@ -21,6 +21,16 @@ The Settings tab in the Data Sources dialog box is shown below. Enter the settin
 
 Click __Save and Test__.
 
+## Programmatically add a SignalFx datasource to Grafana
+
+```yaml
+- name: SignalFX
+  type: signalfx-datasource
+  access: direct
+  jsonData:
+     accessToken: XXX
+  url: https://stream.signalfx.com
+```
 
 # Using SignalFx with Grafana
 
