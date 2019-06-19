@@ -16,7 +16,7 @@ import (
 type SignalFxDatasource struct {
 	plugin.NetRPCUnsupportedPlugin
 	logger       hclog.Logger
-	handlers     []*SignalFxJobHandler
+	handlers     []SignalFxJob
 	client       *signalflow.Client
 	url          string
 	token        string
@@ -29,37 +29,23 @@ type DatasourceInfo struct {
 }
 
 type Target struct {
-	RefID       string        `json:"refId"`
-	Program     string        `json:"program"`
-	StartTime   time.Time     `json:"-"`
-	StartTimeMs int64         `json:"startTime"`
-	StopTime    time.Time     `json:"-"`
-	StopTimeMs  int64         `json:"stopTime"`
-	Interval    time.Duration `json:"-"`
-	IntervalMs  int64         `json:"intervalMs"`
-	Alias       string        `json:"alias"`
-}
-
-func (t *Target) UnmarshalJSON(b []byte) error {
-	type alias Target
-	if err := json.Unmarshal(b, (*alias)(t)); err != nil {
-		return err
-	}
-	t.StartTime = time.Unix(0, t.StartTimeMs*int64(time.Millisecond))
-	t.StopTime = time.Unix(0, t.StopTimeMs*int64(time.Millisecond))
-	t.Interval = time.Duration(t.IntervalMs) * time.Millisecond
-	return nil
+	RefID     string        `json:"refId"`
+	Program   string        `json:"program"`
+	StartTime time.Time     `json:"-"`
+	StopTime  time.Time     `json:"-"`
+	Interval  time.Duration `json:"-"`
+	Alias     string        `json:"alias"`
 }
 
 func NewSignalFxDatasource() *SignalFxDatasource {
 	datasource := &SignalFxDatasource{
 		logger:       pluginLogger,
-		handlers:     make([]*SignalFxJobHandler, 0),
+		handlers:     make([]SignalFxJob, 0),
 		clientMutex:  sync.Mutex{},
 		handlerMutex: sync.Mutex{},
 	}
 	tick := time.NewTicker(time.Second * 30)
-	go datasource.cleanupInactiveJobHandlers(tick)
+	go datasource.cleanup(tick)
 	return datasource
 }
 
@@ -154,12 +140,12 @@ func (t *SignalFxDatasource) getDsInfo(datasourceInfo *datasource.DatasourceInfo
 	return &dsInfo, nil
 }
 
-func (t *SignalFxDatasource) startJobHandler(target Target) (chan []*datasource.TimeSeries, error) {
+func (t *SignalFxDatasource) startJobHandler(target Target) (<-chan []*datasource.TimeSeries, error) {
 	t.handlerMutex.Lock()
 	defer t.handlerMutex.Unlock()
 	// Try to re-use any existing job if possible
 	for _, h := range t.handlers {
-		ch, _ := h.reuse(&target)
+		ch := h.reuse(&target)
 		if ch != nil {
 			return ch, nil
 		}
@@ -193,19 +179,23 @@ func (t *SignalFxDatasource) buildTargets(tsdbReq *datasource.DatasourceRequest)
 	return targets, nil
 }
 
-func (t *SignalFxDatasource) cleanupInactiveJobHandlers(ticker *time.Ticker) {
+func (t *SignalFxDatasource) cleanup(ticker *time.Ticker) {
 	for time := range ticker.C {
-		t.handlerMutex.Lock()
-		active := make([]*SignalFxJobHandler, 0)
-		for _, h := range t.handlers {
-			if h.isActive(time) {
-				active = append(active, h)
-			} else {
-				t.logger.Debug("Stopping inactive job", "program", h.program)
-				h.stop()
-			}
-		}
-		t.handlers = active
-		t.handlerMutex.Unlock()
+		t.cleanupInactiveJobHandlers(time)
 	}
+}
+
+func (t *SignalFxDatasource) cleanupInactiveJobHandlers(time time.Time) {
+	t.handlerMutex.Lock()
+	active := make([]SignalFxJob, 0)
+	for _, h := range t.handlers {
+		if h.isActive(time) {
+			active = append(active, h)
+		} else {
+			t.logger.Debug("Stopping inactive job", "program", h.Program())
+			h.stop()
+		}
+	}
+	t.handlers = active
+	t.handlerMutex.Unlock()
 }

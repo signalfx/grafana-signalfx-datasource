@@ -13,6 +13,7 @@ require (
 	github.com/signalfx/signalfx-go v0.0.0-20190605174419-915597c15c1a
 	github.com/smartystreets/assertions v1.0.0 // indirect
 	github.com/stretchr/objx v0.2.0 // indirect
+	github.com/stretchr/testify v1.3.0
 	golang.org/x/crypto v0.0.0-20190605123033-f99c8df09eb5 // indirect
 	golang.org/x/net v0.0.0-20190603091049-60506f45cf65
 	golang.org/x/sys v0.0.0-20190602015325-4c4f7f33c9ed // indirect
