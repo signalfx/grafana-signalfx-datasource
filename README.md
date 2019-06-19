@@ -26,7 +26,6 @@ Click __Save and Test__.
 ```yaml
 apiVersion: 1
 datasources:
->>>>>>> d34be2f02296905fd090ce3eebd23be82a9de9c5
 - name: SignalFX
   type: signalfx-datasource
   access: direct
