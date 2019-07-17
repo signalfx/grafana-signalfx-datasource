@@ -60,6 +60,8 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             signalflowEndpoint: this.endpoint
           });
           this.streams = [];
+          // give interpolateQueryStr access to this
+          this.interpolateQueryStr = this.interpolateQueryStr.bind(this);
         }
 
         _createClass(SignalFxDatasource, [{
@@ -70,7 +72,7 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             var queries = _.filter(options.targets, function (t) {
               return t.hide !== true;
             }).map(function (t) {
-              return _this.templateSrv.replace(t.program, options.scopedVars);
+              return _this.templateSrv.replace(t.program, options.scopedVars, _this.interpolateQueryStr);
             });
             var program = queries.join('\n');
 
@@ -96,7 +98,7 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             return _.fromPairs(_.filter(options.targets, function (t) {
               return t.hide !== true && t.program && t.alias;
             }).map(function (t) {
-              return { program: _this2.templateSrv.replace(t.program, options.scopedVars || {}), alias: t.alias };
+              return { program: _this2.templateSrv.replace(t.program, options.scopedVars || {}, _this2.interpolateQueryStr), alias: t.alias };
             }).flatMap(function (t) {
               return _this2.extractLabelsWithAlias(t.program, t.alias);
             }));
@@ -227,6 +229,31 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
           value: function doRequest(options) {
             options.headers = this.headers;
             return this.backendSrv.datasourceRequest(options);
+          }
+        }, {
+          key: 'interpolateQueryStr',
+          value: function interpolateQueryStr(value, variable, defaultFormatFn) {
+            // if no multi or include all do not regexEscape
+            if (!variable.multi && !variable.includeAll) {
+              return this.escapeLiteral(value);
+            }
+
+            if (typeof value === 'string') {
+              return this.quoteLiteral(value);
+            }
+
+            var escapedValues = _.map(value, this.quoteLiteral);
+            return escapedValues.join(',');
+          }
+        }, {
+          key: 'quoteLiteral',
+          value: function quoteLiteral(value) {
+            return "'" + String(value).replace(/'/g, "''") + "'";
+          }
+        }, {
+          key: 'escapeLiteral',
+          value: function escapeLiteral(value) {
+            return String(value).replace(/'/g, "''");
           }
         }]);
 
