@@ -24,11 +24,13 @@ export class SignalFxDatasource {
       signalflowEndpoint: this.endpoint,
     });
     this.streams = [];
+    // give interpolateQueryStr access to this
+    this.interpolateQueryStr = this.interpolateQueryStr.bind(this);
   }
 
   query(options) {
     const queries = _.filter(options.targets, t => {return t.hide !== true;})
-    .map(t => this.templateSrv.replace(t.program, options.scopedVars));
+    .map(t => this.templateSrv.replace(t.program, options.scopedVars, this.interpolateQueryStr));
     var program = queries.join('\n');
 
     const aliases = this.collectAliases(options);
@@ -48,7 +50,7 @@ export class SignalFxDatasource {
 
   collectAliases(options) {
     return _.fromPairs(_.filter(options.targets, t => {return t.hide !== true && t.program && t.alias;})
-      .map(t => {return {program: this.templateSrv.replace(t.program, options.scopedVars || {}), alias: t.alias};})
+      .map(t => {return {program: this.templateSrv.replace(t.program, options.scopedVars || {}, this.interpolateQueryStr), alias: t.alias};})
       .flatMap(t => this.extractLabelsWithAlias(t.program, t.alias)));
   }
 
@@ -173,6 +175,28 @@ export class SignalFxDatasource {
   doRequest(options) {
     options.headers = this.headers;
     return this.backendSrv.datasourceRequest(options);
+  }
+
+  interpolateQueryStr(value, variable, defaultFormatFn) {
+    // if no multi or include all do not regexEscape
+    if (!variable.multi && !variable.includeAll) {
+      return this.escapeLiteral(value);
+    }
+
+    if (typeof value === 'string') {
+      return this.quoteLiteral(value);
+    }
+
+    const escapedValues = _.map(value, this.quoteLiteral);
+    return escapedValues.join(',');
+  }
+
+  quoteLiteral(value) {
+    return "'" + String(value).replace(/'/g, "''") + "'";
+  }
+
+  escapeLiteral(value) {
+    return String(value).replace(/'/g, "''");
   }
 
 }
