@@ -27,8 +27,9 @@ export class StreamHandler {
     this.templateSrv = templateSrv;
   }
 
-  start(program, aliases, options) {
+  start(program, aliases, maxDelay, options) {
     this.aliases = aliases;
+    this.maxDelay = maxDelay;
     if (this.isJobReusable(program, options)) {
       if (!this.unboundedBatchPhase) {
         this.promise = defer();
@@ -81,6 +82,8 @@ export class StreamHandler {
       params['stop'] = this.stopTime;
       params['immediate'] = true;
     }
+    if (this.maxDelay)
+      params['maxDelay'] = this.maxDelay;
     this.handle = this.signalflow.execute(params);
     this.running = true;
     this.handle.stream(this.handleData.bind(this));
@@ -93,7 +96,6 @@ export class StreamHandler {
     this.intervalMs = options.intervalMs;
     this.maxDataPoints = options.maxDataPoints;
     this.resolutionMs = options.intervalMs;
-    this.maxDelay = 0;
     this.unbounded = this.stopTime > Date.now() - STREAMING_THRESHOLD_MINUTES * 60 * 1000;
     this.unboundedBatchPhase = this.unbounded;
   }

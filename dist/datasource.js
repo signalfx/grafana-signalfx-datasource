@@ -77,6 +77,7 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             var program = queries.join('\n');
 
             var aliases = this.collectAliases(options);
+            var maxDelay = this.getMaxDelay(options);
 
             // TODO: Better validation can be implemented here 
             if (!program) {
@@ -88,7 +89,7 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
               handler = new StreamHandler(this.signalflow, this.templateSrv);
               this.streams[options.panelId] = handler;
             }
-            return handler.start(program, aliases, options);
+            return handler.start(program, aliases, maxDelay, options);
           }
         }, {
           key: 'collectAliases',
@@ -102,6 +103,14 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             }).flatMap(function (t) {
               return _this2.extractLabelsWithAlias(t.program, t.alias);
             }));
+          }
+        }, {
+          key: 'getMaxDelay',
+          value: function getMaxDelay(options) {
+            var target = _.max(options.targets, function (t) {
+              return t.maxDelay;
+            });
+            if (target) return target.maxDelay;
           }
         }, {
           key: 'extractLabelsWithAlias',

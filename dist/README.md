@@ -21,6 +21,18 @@ The Settings tab in the Data Sources dialog box is shown below. Enter the settin
 
 Click __Save and Test__.
 
+## Provisioning the SignalFx datasource using config files
+
+```yaml
+apiVersion: 1
+datasources:
+- name: SignalFX
+  type: signalfx-datasource
+  access: direct
+  jsonData:
+     accessToken: XXX
+  url: https://stream.signalfx.com
+```
 
 # Using SignalFx with Grafana
 
