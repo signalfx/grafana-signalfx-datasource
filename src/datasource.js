@@ -56,7 +56,10 @@ export class SignalFxDatasource {
   }
 
   getMaxDelay(options) {
-    return _.max(_.map(options.targets, t => t.maxDelay));
+    var maxDelay = _.max(_.map(options.targets, t => t.maxDelay));
+    if (!maxDelay)
+      maxDelay = 0;
+    return maxDelay;
   }
 
   extractLabelsWithAlias(program, alias) {
