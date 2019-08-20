@@ -35,6 +35,7 @@ type Target struct {
 	StopTime  time.Time     `json:"-"`
 	Interval  time.Duration `json:"-"`
 	Alias     string        `json:"alias"`
+	MaxDelay  int32         `json:"maxDelay"`
 }
 
 func NewSignalFxDatasource() *SignalFxDatasource {
