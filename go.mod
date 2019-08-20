@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/yamux v0.0.0-20181012175058-2f1d1f20f75d // indirect
 	github.com/mitchellh/go-testing-interface v1.0.0 // indirect
 	github.com/oklog/run v1.0.0 // indirect
-	github.com/signalfx/signalfx-go v0.0.0-20190605174419-915597c15c1a
+	github.com/signalfx/signalfx-go v1.4.0
 	github.com/smartystreets/assertions v1.0.0 // indirect
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/stretchr/testify v1.3.0

@@ -64,9 +64,9 @@ System.register(['lodash', 'moment'], function (_export, _context) {
 
         _createClass(StreamHandler, [{
           key: 'start',
-          value: function start(program, aliases, options) {
+          value: function start(program, aliases, maxDelay, options) {
             this.aliases = aliases;
-            if (this.isJobReusable(program, options)) {
+            if (this.isJobReusable(program, maxDelay, options)) {
               if (!this.unboundedBatchPhase) {
                 this.promise = defer();
                 this.initializeTimeRange(options);
@@ -75,6 +75,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             } else {
               this.promise = defer();
               this.stop();
+              this.maxDelay = maxDelay;
               this.execute(program, options);
             }
             this.setupCleanupTask();
@@ -82,8 +83,8 @@ System.register(['lodash', 'moment'], function (_export, _context) {
           }
         }, {
           key: 'isJobReusable',
-          value: function isJobReusable(program, options) {
-            return this.program == program && this.intervalMs == options.intervalMs && this.startTime <= options.range.from.valueOf() && (this.unbounded && this.running || this.stopTime >= options.range.to.valueOf());
+          value: function isJobReusable(program, maxDelay, options) {
+            return this.program == program && this.maxDelay == maxDelay && this.intervalMs == options.intervalMs && this.startTime <= options.range.from.valueOf() && (this.unbounded && this.running || this.stopTime >= options.range.to.valueOf());
           }
         }, {
           key: 'setupCleanupTask',
@@ -121,6 +122,9 @@ System.register(['lodash', 'moment'], function (_export, _context) {
               params['stop'] = this.stopTime;
               params['immediate'] = true;
             }
+            if (this.maxDelay) {
+              params['maxDelay'] = this.maxDelay;
+            }
             this.handle = this.signalflow.execute(params);
             this.running = true;
             this.handle.stream(this.handleData.bind(this));
@@ -134,7 +138,6 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             this.intervalMs = options.intervalMs;
             this.maxDataPoints = options.maxDataPoints;
             this.resolutionMs = options.intervalMs;
-            this.maxDelay = 0;
             this.unbounded = this.stopTime > Date.now() - STREAMING_THRESHOLD_MINUTES * 60 * 1000;
             this.unboundedBatchPhase = this.unbounded;
           }

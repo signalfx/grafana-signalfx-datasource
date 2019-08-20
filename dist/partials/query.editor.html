@@ -24,6 +24,17 @@
 			ng-blur="ctrl.refresh()"
 		/>
 	</div>
+	<div class="gf-form max-width-25">
+		<label class="gf-form-label query-keyword">MAX DELAY</label>
+		<input
+			type="number"
+			class="gf-form-input"
+			ng-model="ctrl.target.maxDelay"
+			spellcheck="false"
+			placeholder="Max delay in milliseconds"
+			ng-blur="ctrl.refresh()"
+		/>
+	</div>
   <div class="gf-form" ng-show="ctrl.lastError">
     <pre class="gf-form-pre alert alert-error">{{ctrl.lastError}}</pre>
 	</div>
