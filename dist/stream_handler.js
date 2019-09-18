@@ -75,8 +75,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             } else {
               this.promise = defer();
               this.stop();
-              this.maxDelay = maxDelay;
-              this.execute(program, options);
+              this.execute(program, maxDelay, options);
             }
             this.setupCleanupTask();
             return this.promise;
@@ -84,7 +83,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
         }, {
           key: 'isJobReusable',
           value: function isJobReusable(program, maxDelay, options) {
-            return this.program == program && this.maxDelay == maxDelay && this.intervalMs == options.intervalMs && this.startTime <= options.range.from.valueOf() && (this.unbounded && this.running || this.stopTime >= options.range.to.valueOf());
+            return this.program == program && this.desiredMaxDelay == maxDelay && this.intervalMs == options.intervalMs && this.startTime <= options.range.from.valueOf() && (this.unbounded && this.running || this.stopTime >= options.range.to.valueOf());
           }
         }, {
           key: 'setupCleanupTask',
@@ -110,9 +109,9 @@ System.register(['lodash', 'moment'], function (_export, _context) {
           }
         }, {
           key: 'execute',
-          value: function execute(program, options) {
+          value: function execute(program, maxDelay, options) {
             console.log('Starting SignalFlow computation: ' + program);
-            this.initialize(program, options);
+            this.initialize(program, maxDelay, options);
             var params = {
               program: this.program,
               start: this.startTime,
@@ -131,9 +130,11 @@ System.register(['lodash', 'moment'], function (_export, _context) {
           }
         }, {
           key: 'initialize',
-          value: function initialize(program, options) {
+          value: function initialize(program, maxDelay, options) {
             this.metrics = {};
             this.program = program;
+            this.maxDelay = maxDelay;
+            this.desiredMaxDelay = maxDelay;
             this.initializeTimeRange(options);
             this.intervalMs = options.intervalMs;
             this.maxDataPoints = options.maxDataPoints;
