@@ -38,8 +38,7 @@ export class StreamHandler {
     } else {
       this.promise = defer();
       this.stop();
-      this.maxDelay = maxDelay;
-      this.execute(program, options);
+      this.execute(program, maxDelay, options);
     }
     this.setupCleanupTask();
     return this.promise;
@@ -47,7 +46,7 @@ export class StreamHandler {
 
   isJobReusable(program, maxDelay, options) {
     return this.program == program
-      && this.maxDelay == maxDelay
+      && this.desiredMaxDelay == maxDelay
       && this.intervalMs == options.intervalMs
       && this.startTime <= options.range.from.valueOf()
       && ((this.unbounded && this.running) || this.stopTime >= options.range.to.valueOf());
@@ -71,9 +70,9 @@ export class StreamHandler {
     }
   }
 
-  execute(program, options) {
+  execute(program, maxDelay, options) {
     console.log('Starting SignalFlow computation: ' + program);
-    this.initialize(program, options);
+    this.initialize(program, maxDelay, options);
     var params = {
       program: this.program,
       start: this.startTime,
@@ -91,9 +90,11 @@ export class StreamHandler {
     this.handle.stream(this.handleData.bind(this));
   }
 
-  initialize(program, options) {
+  initialize(program, maxDelay, options) {
     this.metrics = {};
     this.program = program;
+    this.maxDelay = maxDelay;
+    this.desiredMaxDelay = maxDelay;
     this.initializeTimeRange(options);
     this.intervalMs = options.intervalMs;
     this.maxDataPoints = options.maxDataPoints;
