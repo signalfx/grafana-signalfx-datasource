@@ -1,4 +1,4 @@
-// Copyright (C) 2019 SignalFx, Inc. All rights reserved.
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 import _ from "lodash";
 import {QueryCtrl} from 'app/plugins/sdk';
 

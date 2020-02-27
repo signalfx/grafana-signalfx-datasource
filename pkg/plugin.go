@@ -1,3 +1,4 @@
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 package main
 
 import (

@@ -1,9 +1,9 @@
 'use strict';
 
-System.register(['lodash', 'moment'], function (_export, _context) {
+System.register(['lodash', './tag_processor', 'moment'], function (_export, _context) {
   "use strict";
 
-  var _, moment, _createClass, MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE, INACTIVE_JOB_MINUTES, STREAMING_THRESHOLD_MINUTES, StreamHandler;
+  var _, TagProcessor, moment, _createClass, MAX_DATAPOINTS_TO_KEEP_BEFORE_TIMERANGE, INACTIVE_JOB_MINUTES, STREAMING_THRESHOLD_MINUTES, StreamHandler;
 
   function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) {
@@ -28,6 +28,8 @@ System.register(['lodash', 'moment'], function (_export, _context) {
   return {
     setters: [function (_lodash) {
       _ = _lodash.default;
+    }, function (_tag_processor) {
+      TagProcessor = _tag_processor.TagProcessor;
     }, function (_moment) {
       moment = _moment.default;
     }],
@@ -59,7 +61,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
           _classCallCheck(this, StreamHandler);
 
           this.signalflow = signalflow;
-          this.templateSrv = templateSrv;
+          this.tagProcessor = new TagProcessor(templateSrv);
         }
 
         _createClass(StreamHandler, [{
@@ -226,7 +228,7 @@ System.register(['lodash', 'moment'], function (_export, _context) {
                   maxTime = datapoints[datapoints.length - 1][1];
                 }
               }
-              var tsName = this.getTimeSeriesName(tsId);
+              var tsName = this.tagProcessor.timeSeriesNameAndId(tsId, this.handle.get_metadata(tsId).properties, this.aliases);
               seriesList.push({ target: tsName.name, id: tsName.id, datapoints: datapoints.slice() });
             }
             // Ensure consistent TS order
@@ -239,56 +241,6 @@ System.register(['lodash', 'moment'], function (_export, _context) {
             };
             this.promise.resolve(data);
             console.debug('Data returned: ' + this.program);
-          }
-        }, {
-          key: 'getTimeSeriesName',
-          value: function getTimeSeriesName(tsId) {
-            var obj = this.handle.get_metadata(tsId);
-            if (!obj) {
-              return { id: tsId, name: tsId };
-            }
-
-            var candidates = ['sf_metric', 'sf_originatingMetric'];
-            var excludedDimensions = ['sf_metric', 'sf_originatingMetric', 'jobId', 'programId', 'computationId'];
-
-            var tsVars = {};
-            var result = [];
-            for (var c in candidates) {
-              var value = obj.properties[candidates[c]];
-              if (value && !value.toLowerCase().startsWith('_sf_')) {
-                tsVars['metric'] = { text: value, value: value };
-                result.push(value);
-              }
-            }
-
-            var key = [];
-            for (var k in obj.properties['sf_key']) {
-              var dimension = obj.properties['sf_key'][k];
-              if (excludedDimensions.indexOf(dimension) === -1) {
-                var value = obj.properties[dimension];
-                if (value) {
-                  key.push(dimension + '=' + value);
-                  tsVars[dimension] = { text: value, value: value };
-                }
-              }
-            }
-
-            result.push(key.join(','));
-
-            var repr = '';
-            var alias = null;
-            if (obj.properties['sf_streamLabel']) {
-              tsVars['label'] = { text: obj.properties['sf_streamLabel'], value: obj.properties['sf_streamLabel'] };
-              repr += obj.properties['sf_streamLabel'] + ':';
-              alias = this.aliases[obj.properties['sf_streamLabel']];
-            } else {
-              alias = _.find(this.aliases, function (a) {
-                return true;
-              });
-            }
-            var id = repr + result.join('/');
-            var name = alias ? this.templateSrv.replace(alias, tsVars) : id;
-            return { id: id, name: name };
           }
         }]);
 

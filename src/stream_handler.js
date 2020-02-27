@@ -1,5 +1,6 @@
-// Copyright (C) 2019 SignalFx, Inc. All rights reserved.
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 import _ from "lodash";
+import {TagProcessor} from './tag_processor';
 import moment from 'moment';
 
 function defer() {
@@ -24,7 +25,7 @@ export class StreamHandler {
 
   constructor(signalflow, templateSrv) {
     this.signalflow = signalflow;
-    this.templateSrv = templateSrv;
+    this.tagProcessor = new TagProcessor(templateSrv);
   }
 
   start(program, aliases, maxDelay, options) {
@@ -178,7 +179,7 @@ export class StreamHandler {
           maxTime = datapoints[datapoints.length - 1][1];
         }
       }
-      var tsName = this.getTimeSeriesName(tsId);
+      var tsName = this.tagProcessor.timeSeriesNameAndId(tsId, this.handle.get_metadata(tsId).properties, this.aliases);
       seriesList.push({ target: tsName.name, id: tsName.id, datapoints: datapoints.slice() });
     }
     // Ensure consistent TS order
@@ -191,50 +192,4 @@ export class StreamHandler {
     console.debug('Data returned: ' + this.program);
   }
 
-  getTimeSeriesName(tsId) {
-    var obj = this.handle.get_metadata(tsId);
-    if (!obj) {
-      return { id: tsId, name: tsId };
-    }
-
-    var candidates = ['sf_metric', 'sf_originatingMetric'];
-    var excludedDimensions = ['sf_metric', 'sf_originatingMetric', 'jobId', 'programId', 'computationId'];
-
-    var tsVars = {};
-    var result = [];
-    for (var c in candidates) {
-      var value = obj.properties[candidates[c]];
-      if (value && !value.toLowerCase().startsWith('_sf_')) {
-        tsVars['metric'] = { text: value, value: value };
-        result.push(value);
-      }
-    }
-
-    var key = [];
-    for (var k in obj.properties['sf_key']) {
-      var dimension = obj.properties['sf_key'][k];
-      if (excludedDimensions.indexOf(dimension) === -1) {
-        var value = obj.properties[dimension];
-        if (value) {
-          key.push(dimension + '=' + value);
-          tsVars[dimension] = { text: value, value: value };
-        }
-      }
-    }
-
-    result.push(key.join(','));
-
-    var repr = '';
-    var alias = null;
-    if (obj.properties['sf_streamLabel']) {
-      tsVars['label'] = { text: obj.properties['sf_streamLabel'], value: obj.properties['sf_streamLabel'] };
-      repr += obj.properties['sf_streamLabel'] + ':';
-      alias = this.aliases[obj.properties['sf_streamLabel']];
-    } else {
-      alias = _.find(this.aliases, a => true);
-    }
-    var id = repr + result.join('/');
-    var name = alias ? this.templateSrv.replace(alias, tsVars) : id;
-    return { id, name };
-  }
 }

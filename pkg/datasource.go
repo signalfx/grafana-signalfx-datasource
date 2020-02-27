@@ -35,7 +35,7 @@ type Target struct {
 	StopTime  time.Time     `json:"-"`
 	Interval  time.Duration `json:"-"`
 	Alias     string        `json:"alias"`
-	MaxDelay  int32         `json:"maxDelay"`
+	MaxDelay  int64         `json:"maxDelay"`
 }
 
 func NewSignalFxDatasource() *SignalFxDatasource {
@@ -80,6 +80,7 @@ func (t *SignalFxDatasource) Query(ctx context.Context, tsdbReq *datasource.Data
 		}
 		response.Results = append(response.Results, result)
 	}
+	t.logger.Info("Sending response", "response", response)
 	return response, nil
 }
 
@@ -169,6 +170,7 @@ func (t *SignalFxDatasource) buildTargets(tsdbReq *datasource.DatasourceRequest)
 	targets := make([]Target, 0)
 	for _, query := range tsdbReq.Queries {
 		target := Target{}
+		target.MaxDelay = 0
 		if err := json.Unmarshal([]byte(query.ModelJson), &target); err != nil {
 			return nil, err
 		}
