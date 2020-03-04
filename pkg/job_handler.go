@@ -52,7 +52,7 @@ type SignalFxJobHandler struct {
 }
 
 const streamingThresholdTimeout = 2 * time.Minute
-const maxDatapointsToKeepBeforeTimerange = 1
+const maxDatapointsToKeepBeforeTimerange = 10
 const inactiveJobTimeout = 6 * time.Minute
 
 func (t *SignalFxJobHandler) start(target *Target) (<-chan []*datasource.TimeSeries, error) {
@@ -161,25 +161,27 @@ func (t *SignalFxJobHandler) readDataMessages() {
 }
 
 func (t *SignalFxJobHandler) handleDataMessage(m *messages.DataMessage) bool {
-	timestamp := time.Unix(0, int64(m.TimestampMillis)*int64(time.Millisecond))
-	for _, pl := range m.Payloads {
-		tsid := int64(pl.TSID)
-		value := pl.Value()
-		if (t.Points[tsid]) == nil {
-			t.Points[tsid] = make([]*datasource.Point, 0)
+	if m != nil {
+		timestamp := time.Unix(0, int64(m.TimestampMillis)*int64(time.Millisecond))
+		for _, pl := range m.Payloads {
+			tsid := int64(pl.TSID)
+			value := pl.Value()
+			if (t.Points[tsid]) == nil {
+				t.Points[tsid] = make([]*datasource.Point, 0)
+			}
+			t.Points[tsid] = append(t.Points[tsid], &datasource.Point{
+				Timestamp: timestamp.UnixNano() / int64(time.Millisecond),
+				Value:     toFloat64(value),
+			})
 		}
-		t.Points[tsid] = append(t.Points[tsid], &datasource.Point{
-			Timestamp: timestamp.UnixNano() / int64(time.Millisecond),
-			Value:     toFloat64(value),
-		})
-	}
-	resolution := t.computation.Resolution()
-	if resolution > 0 {
-		maxDelay := t.computation.MaxDelay()
-		// Estimate the timestamp of the last datapoint already available in the system
-		nextEstimatedTimestamp := timestamp.Add(2*resolution - 1).Add(maxDelay).Truncate(resolution)
-		roundedCutoffTime := t.cutoffTime.Truncate(resolution)
-		return nextEstimatedTimestamp.After(roundedCutoffTime)
+		resolution := t.computation.Resolution()
+		if resolution > 0 {
+			maxDelay := t.computation.MaxDelay()
+			// Estimate the timestamp of the last datapoint already available in the system
+			nextEstimatedTimestamp := timestamp.Add(2*resolution - 1).Add(maxDelay).Truncate(resolution)
+			roundedCutoffTime := t.cutoffTime.Truncate(resolution)
+			return nextEstimatedTimestamp.After(roundedCutoffTime)
+		}
 	}
 	return false
 }
