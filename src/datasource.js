@@ -205,7 +205,7 @@ export class SignalFxDatasource {
       queries: [{
         datasourceId: this.datasourceId,
         path: options.url,
-        query: _.toPairs(options.params).map(p => p[0] + '=' + p[1]).join('&'),
+        query: _.toPairs(options.params).map(p => encodeURIComponent(p[0]) + '=' + encodeURIComponent(p[1])).join('&'),
         data: options.data
       }]
     };

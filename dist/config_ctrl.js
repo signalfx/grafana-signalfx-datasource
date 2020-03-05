@@ -53,7 +53,6 @@ System.register([], function (_export, _context) {
                         if (this.current.access === 'proxy') {
                             this.current.jsonData.accessToken = null;
                         }
-                        console.log(this.current.access);
                     }
                 }]);
 

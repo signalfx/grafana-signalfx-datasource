@@ -69,8 +69,7 @@ System.register(['lodash', './tag_processor'], function (_export, _context) {
                                 }]
                             }
                         }).then(function (response) {
-                            console.log(response);
-                            if (response.status === 200) {
+                            if (response.status >= 200 && response.status < 300) {
                                 var seriesList = [];
                                 var r = response.data.results[refId];
                                 _.forEach(r.series, function (s) {

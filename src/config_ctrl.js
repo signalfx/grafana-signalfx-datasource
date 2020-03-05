@@ -16,7 +16,6 @@ export class SignalFxConfigCtrl {
         if (this.current.access === 'proxy') {
             this.current.jsonData.accessToken = null;
         }
-        console.log(this.current.access);
     }
 }
 SignalFxConfigCtrl.templateUrl = 'partials/config.html';

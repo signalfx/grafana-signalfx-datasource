@@ -267,7 +267,7 @@ System.register(['lodash', './signalfx', './stream_handler', './proxy_handler'],
                 datasourceId: this.datasourceId,
                 path: options.url,
                 query: _.toPairs(options.params).map(function (p) {
-                  return p[0] + '=' + p[1];
+                  return encodeURIComponent(p[0]) + '=' + encodeURIComponent(p[1]);
                 }).join('&'),
                 data: options.data
               }]
