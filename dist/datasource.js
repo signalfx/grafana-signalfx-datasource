@@ -1,9 +1,9 @@
 'use strict';
 
-System.register(['lodash', './signalfx', './stream_handler'], function (_export, _context) {
+System.register(['lodash', './signalfx', './stream_handler', './proxy_handler'], function (_export, _context) {
   "use strict";
 
-  var _, signalfx, StreamHandler, _createClass, SignalFxDatasource;
+  var _, signalfx, StreamHandler, ProxyHandler, _createClass, SignalFxDatasource;
 
   function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) {
@@ -18,6 +18,8 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
       signalfx = _signalfx.default;
     }, function (_stream_handler) {
       StreamHandler = _stream_handler.StreamHandler;
+    }, function (_proxy_handler) {
+      ProxyHandler = _proxy_handler.ProxyHandler;
     }],
     execute: function () {
       _createClass = function () {
@@ -42,6 +44,7 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
         function SignalFxDatasource(instanceSettings, $q, backendSrv, templateSrv) {
           _classCallCheck(this, SignalFxDatasource);
 
+          this.datasourceId = instanceSettings.id;
           this.type = instanceSettings.type;
           this.url = instanceSettings.url;
           this.name = instanceSettings.name;
@@ -51,14 +54,18 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
           this.withCredentials = instanceSettings.withCredentials;
           this.authToken = instanceSettings.jsonData.accessToken;
           this.headers = { 'Content-Type': 'application/json' };
-          this.headers['X-SF-TOKEN'] = this.authToken;
-          this.endpoint = instanceSettings.url.replace(/^(http)(s)?:/, function (match, p1, p2) {
-            return 'ws' + (p2 || '') + ':';
-          });
-          console.log('Using SignalFx at ' + this.endpoint);
-          this.signalflow = window.signalfx.streamer.SignalFlow(this.authToken, {
-            signalflowEndpoint: this.endpoint
-          });
+          if (this.url.startsWith("/")) {
+            this.proxyAccess = true;
+          } else {
+            this.headers['X-SF-TOKEN'] = this.authToken;
+            this.endpoint = instanceSettings.url.replace(/^(http)(s)?:/, function (match, p1, p2) {
+              return 'ws' + (p2 || '') + ':';
+            });
+            console.log('Using SignalFx at ' + this.endpoint);
+            this.signalflow = window.signalfx.streamer.SignalFlow(this.authToken, {
+              signalflowEndpoint: this.endpoint
+            });
+          }
           this.streams = [];
           // give interpolateQueryStr access to this
           this.interpolateQueryStr = this.interpolateQueryStr.bind(this);
@@ -83,13 +90,7 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             if (!program) {
               return Promise.resolve({ data: [] });
             }
-
-            var handler = this.streams[options.panelId];
-            if (!handler) {
-              handler = new StreamHandler(this.signalflow, this.templateSrv);
-              this.streams[options.panelId] = handler;
-            }
-            return handler.start(program, aliases, maxDelay, options);
+            return this.getSignalflowHandler(options).start(program, aliases, maxDelay, options);
           }
         }, {
           key: 'collectAliases',
@@ -105,20 +106,11 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             }));
           }
         }, {
-          key: 'getMaxDelay',
-          value: function getMaxDelay(options) {
-            var maxDelay = _.max(_.map(options.targets, function (t) {
-              return t.maxDelay;
-            }));
-            if (!maxDelay) maxDelay = 0;
-            return maxDelay;
-          }
-        }, {
           key: 'extractLabelsWithAlias',
           value: function extractLabelsWithAlias(program, alias) {
             var re = /label\s?=\s?'([\w]*?)'/igm;
             var labels = [];
-            var m;
+            var m = void 0;
             do {
               m = re.exec(program);
               if (m) {
@@ -128,10 +120,32 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
             return labels;
           }
         }, {
+          key: 'getMaxDelay',
+          value: function getMaxDelay(options) {
+            var maxDelay = _.max(_.map(options.targets, function (t) {
+              return t.maxDelay;
+            }));
+            if (!maxDelay) maxDelay = 0;
+            return maxDelay;
+          }
+        }, {
+          key: 'getSignalflowHandler',
+          value: function getSignalflowHandler(options) {
+            if (this.proxyAccess) {
+              return new ProxyHandler(this.datasourceId, this.backendSrv, this.templateSrv);
+            }
+            var handler = this.streams[options.panelId];
+            if (!handler) {
+              handler = new StreamHandler(this.signalflow, this.templateSrv);
+              this.streams[options.panelId] = handler;
+            }
+            return handler;
+          }
+        }, {
           key: 'testDatasource',
           value: function testDatasource() {
             return this.doRequest({
-              url: this.url + '/v2/metric',
+              url: '/v2/metric',
               method: 'GET'
             }).then(function (response) {
               if (response.status === 200) {
@@ -167,7 +181,8 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
         }, {
           key: 'getMetrics',
           value: function getMetrics(query) {
-            return this.doQueryRequest('/v2/metric', 'name:' + (query ? query : '*')).then(this.mapMetricsToTextValue);
+            var mapFunc = this.proxyAccess ? this.mapPropertiesToTextValue : this.mapMetricsToTextValue;
+            return this.doQueryRequest('/v2/metric', 'name:' + (query ? query : '*')).then(mapFunc);
           }
         }, {
           key: 'mapMetricsToTextValue',
@@ -179,17 +194,17 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
         }, {
           key: 'getPropertyKeys',
           value: function getPropertyKeys(metric, partialInput) {
-            return this.doSuggestQueryRequest(metric, null, partialInput).then(this.mapPropertiesToTextValue);
+            return this.doSuggestQueryRequest(metric, null, partialInput);
           }
         }, {
           key: 'getPropertyValues',
           value: function getPropertyValues(metric, propertyKey, partialInput) {
-            return this.doSuggestQueryRequest(metric, propertyKey, partialInput).then(this.mapPropertiesToTextValue);
+            return this.doSuggestQueryRequest(metric, propertyKey, partialInput);
           }
         }, {
           key: 'getTags',
           value: function getTags(metric, partialInput) {
-            return this.doSuggestQueryRequest(metric, 'sf_tags', partialInput).then(this.mapPropertiesToTextValue);
+            return this.doSuggestQueryRequest(metric, 'sf_tags', partialInput);
           }
         }, {
           key: 'mapPropertiesToTextValue',
@@ -202,7 +217,7 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
           key: 'doQueryRequest',
           value: function doQueryRequest(path, query) {
             return this.doRequest({
-              url: this.url + path,
+              url: path,
               params: { query: this.escapeQuery(query), limit: 100 },
               method: 'GET'
             });
@@ -224,10 +239,10 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
               additionalQuery: null
             };
             return this.doRequest({
-              url: this.url + '/v2/suggest/_signalflowsuggest',
+              url: '/v2/suggest/_signalflowsuggest',
               data: JSON.stringify(request),
               method: 'POST'
-            });
+            }).then(this.mapPropertiesToTextValue);
           }
         }, {
           key: 'escapeQuery',
@@ -237,8 +252,40 @@ System.register(['lodash', './signalfx', './stream_handler'], function (_export,
         }, {
           key: 'doRequest',
           value: function doRequest(options) {
+            if (this.proxyAccess) {
+              return this.doBackendProxyRequest(options);
+            }
             options.headers = this.headers;
+            options.url = this.url + options.url;
             return this.backendSrv.datasourceRequest(options);
+          }
+        }, {
+          key: 'doBackendProxyRequest',
+          value: function doBackendProxyRequest(options) {
+            options.data = {
+              queries: [{
+                datasourceId: this.datasourceId,
+                path: options.url,
+                query: _.toPairs(options.params).map(function (p) {
+                  return p[0] + '=' + p[1];
+                }).join('&'),
+                data: options.data
+              }]
+            };
+            options.url = '/api/tsdb/query';
+            options.method = 'POST';
+            return this.backendSrv.datasourceRequest(options).then(this.mapBackendProxyResponse);
+          }
+        }, {
+          key: 'mapBackendProxyResponse',
+          value: function mapBackendProxyResponse(response) {
+            var table = response.data.results.items.tables[0];
+            var results = [];
+            for (var row = 0; row < table.rows.length; row++) {
+              results.push(table.rows[row][0]);
+            }
+            response.data = results;
+            return response;
           }
         }, {
           key: 'interpolateQueryStr',

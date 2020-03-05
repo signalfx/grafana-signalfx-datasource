@@ -1,11 +1,13 @@
-// Copyright (C) 2019 SignalFx, Inc. All rights reserved.
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 import _ from "lodash";
 import signalfx from './signalfx';
 import {StreamHandler} from './stream_handler';
+import {ProxyHandler} from './proxy_handler';
 
 export class SignalFxDatasource {
 
   constructor(instanceSettings, $q, backendSrv, templateSrv) {
+    this.datasourceId = instanceSettings.id;
     this.type = instanceSettings.type;
     this.url = instanceSettings.url;
     this.name = instanceSettings.name;
@@ -15,14 +17,18 @@ export class SignalFxDatasource {
     this.withCredentials = instanceSettings.withCredentials;
     this.authToken = instanceSettings.jsonData.accessToken;
     this.headers = {'Content-Type': 'application/json'};
-    this.headers['X-SF-TOKEN'] = this.authToken;
-    this.endpoint = instanceSettings.url.replace(/^(http)(s)?:/, function(match, p1, p2) {
-      return 'ws' + (p2 || '') + ':';
-    });
-    console.log('Using SignalFx at ' + this.endpoint);
-    this.signalflow = window.signalfx.streamer.SignalFlow(this.authToken, {
-      signalflowEndpoint: this.endpoint,
-    });
+    if (this.url.startsWith("/")) {
+      this.proxyAccess = true;
+    } else {
+      this.headers['X-SF-TOKEN'] = this.authToken;
+      this.endpoint = instanceSettings.url.replace(/^(http)(s)?:/, function(match, p1, p2) {
+        return 'ws' + (p2 || '') + ':';
+      });
+      console.log('Using SignalFx at ' + this.endpoint);
+      this.signalflow = window.signalfx.streamer.SignalFlow(this.authToken, {
+        signalflowEndpoint: this.endpoint,
+      });
+    }
     this.streams = [];
     // give interpolateQueryStr access to this
     this.interpolateQueryStr = this.interpolateQueryStr.bind(this);
@@ -31,7 +37,7 @@ export class SignalFxDatasource {
   query(options) {
     const queries = _.filter(options.targets, t => {return t.hide !== true;})
     .map(t => this.templateSrv.replace(t.program, options.scopedVars, this.interpolateQueryStr));
-    var program = queries.join('\n');
+    const program = queries.join('\n');
 
     const aliases = this.collectAliases(options);
     const maxDelay = this.getMaxDelay(options);
@@ -40,13 +46,7 @@ export class SignalFxDatasource {
     if (!program) {
       return Promise.resolve({data: []});
     }
-
-    var handler = this.streams[options.panelId];
-    if (!handler) {
-      handler = new StreamHandler(this.signalflow, this.templateSrv);
-      this.streams[options.panelId] = handler;
-    }
-    return handler.start(program, aliases, maxDelay, options);
+    return this.getSignalflowHandler(options).start(program, aliases, maxDelay, options);
   }
 
   collectAliases(options) {
@@ -55,17 +55,10 @@ export class SignalFxDatasource {
       .flatMap(t => this.extractLabelsWithAlias(t.program, t.alias)));
   }
 
-  getMaxDelay(options) {
-    var maxDelay = _.max(_.map(options.targets, t => t.maxDelay));
-    if (!maxDelay)
-      maxDelay = 0;
-    return maxDelay;
-  }
-
   extractLabelsWithAlias(program, alias) {
     const re = /label\s?=\s?'([\w]*?)'/igm;
-    var labels = [];
-    var m;
+    const labels = [];
+    let m;
     do {
         m = re.exec(program);
         if (m) {
@@ -75,9 +68,28 @@ export class SignalFxDatasource {
     return labels;
   }
 
+  getMaxDelay(options) {
+    let maxDelay = _.max(_.map(options.targets, t => t.maxDelay));
+    if (!maxDelay)
+      maxDelay = 0;
+    return maxDelay;
+  }
+
+  getSignalflowHandler(options) {
+    if (this.proxyAccess) {
+      return new ProxyHandler(this.datasourceId, this.backendSrv, this.templateSrv);
+    }
+    let handler = this.streams[options.panelId];
+    if (!handler) {
+      handler = new StreamHandler(this.signalflow, this.templateSrv);
+      this.streams[options.panelId] = handler;
+    }
+    return handler;
+  }
+
   testDatasource() {
     return this.doRequest({
-      url: this.url + '/v2/metric',
+      url: '/v2/metric',
       method: 'GET',
     }).then(response => {
       if (response.status === 200) {
@@ -87,19 +99,19 @@ export class SignalFxDatasource {
   }
 
   metricFindQuery(query) {
-    var metricNameQuery = query.match(/^metrics\(([^\)]*?)\)/);
+    const metricNameQuery = query.match(/^metrics\(([^\)]*?)\)/);
     if (metricNameQuery) {
       return this.getMetrics(this.templateSrv.replace(metricNameQuery[1]));
     }
-    var propertyKeysQuery = query.match(/^property_keys\(([^\)]+?)(,\s?([^,]+?))?\)/);
+    const propertyKeysQuery = query.match(/^property_keys\(([^\)]+?)(,\s?([^,]+?))?\)/);
     if (propertyKeysQuery) {
       return this.getPropertyKeys(this.templateSrv.replace(propertyKeysQuery[1]), this.templateSrv.replace(propertyKeysQuery[3]));
     }
-    var propertyValuesQuery = query.match(/^property_values\(([^,]+?),\s?([^,]+?)(,\s?(.+))?\)/);
+    const propertyValuesQuery = query.match(/^property_values\(([^,]+?),\s?([^,]+?)(,\s?(.+))?\)/);
     if (propertyValuesQuery) {
       return this.getPropertyValues(this.templateSrv.replace(propertyValuesQuery[1]), this.templateSrv.replace(propertyValuesQuery[2]), this.templateSrv.replace(propertyValuesQuery[4]));
     }
-    var tagsQuery = query.match(/^tags\(([^\)]+?)(,\s?([^,]+?))?\)/);
+    const tagsQuery = query.match(/^tags\(([^\)]+?)(,\s?([^,]+?))?\)/);
     if (tagsQuery) {
       return this.getTags(this.templateSrv.replace(tagsQuery[1]), this.templateSrv.replace(tagsQuery[3]));
     }
@@ -111,8 +123,9 @@ export class SignalFxDatasource {
   }
 
   getMetrics(query) {
+    let mapFunc = this.proxyAccess ? this.mapPropertiesToTextValue : this.mapMetricsToTextValue;
     return this.doQueryRequest('/v2/metric', 'name:' + (query ? query : '*'))
-      .then(this.mapMetricsToTextValue);
+      .then(mapFunc);
   }
 
   mapMetricsToTextValue(result) {
@@ -122,18 +135,15 @@ export class SignalFxDatasource {
   }
 
   getPropertyKeys(metric, partialInput) {
-    return this.doSuggestQueryRequest(metric, null, partialInput)
-      .then(this.mapPropertiesToTextValue);
+    return this.doSuggestQueryRequest(metric, null, partialInput);
   }
 
   getPropertyValues(metric, propertyKey, partialInput) {
-    return this.doSuggestQueryRequest(metric, propertyKey, partialInput)
-      .then(this.mapPropertiesToTextValue);
+    return this.doSuggestQueryRequest(metric, propertyKey, partialInput);
   }
 
   getTags(metric, partialInput) {
-    return this.doSuggestQueryRequest(metric, 'sf_tags', partialInput)
-      .then(this.mapPropertiesToTextValue);
+    return this.doSuggestQueryRequest(metric, 'sf_tags', partialInput);
   }
 
   mapPropertiesToTextValue(result) {
@@ -149,18 +159,18 @@ export class SignalFxDatasource {
 
   doQueryRequest(path, query) {
     return this.doRequest({
-      url: this.url + path,
+      url: path,
       params: {query: this.escapeQuery(query), limit: 100},
       method: 'GET',
     });
   }
 
   doSuggestQueryRequest(metric, property, partialInput) {
-    var program = {
+    const program = {
       programText: 'data(\'' + metric +'\').publish(label=\'A\')',
       packageSpecifications: ''
     };
-    var request = {
+    const request = {
       programs: [program],
       property,
       partialInput: partialInput != null ? partialInput : '',
@@ -170,10 +180,11 @@ export class SignalFxDatasource {
       additionalQuery: null
     };
     return this.doRequest({
-      url: this.url + '/v2/suggest/_signalflowsuggest',
+      url: '/v2/suggest/_signalflowsuggest',
       data: JSON.stringify(request),
       method: 'POST'
-    });
+    })
+    .then(this.mapPropertiesToTextValue);
   }
 
   escapeQuery(query) {
@@ -181,8 +192,36 @@ export class SignalFxDatasource {
   }
 
   doRequest(options) {
+    if (this.proxyAccess) {
+      return this.doBackendProxyRequest(options);
+    }
     options.headers = this.headers;
+    options.url = this.url + options.url;
     return this.backendSrv.datasourceRequest(options);
+  }
+
+  doBackendProxyRequest(options) {
+    options.data = {
+      queries: [{
+        datasourceId: this.datasourceId,
+        path: options.url,
+        query: _.toPairs(options.params).map(p => p[0] + '=' + p[1]).join('&'),
+        data: options.data
+      }]
+    };
+    options.url = '/api/tsdb/query';
+    options.method =  'POST';
+    return this.backendSrv.datasourceRequest(options).then(this.mapBackendProxyResponse);
+  }
+
+  mapBackendProxyResponse(response) {
+    const table = response.data.results.items.tables[0];
+    const results = []
+    for (let row = 0; row < table.rows.length; row++) {
+      results.push(table.rows[row][0]);
+    }
+    response.data = results;
+    return response;
   }
 
   interpolateQueryStr(value, variable, defaultFormatFn) {
