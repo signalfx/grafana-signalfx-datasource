@@ -1,6 +1,6 @@
 // Copyright (C) 2020 Splunk, Inc. All rights reserved.
 import _ from "lodash";
-import {TagProcessor} from './tag_processor';
+import { TagProcessor } from './tag_processor';
 
 export class ProxyHandler {
 
@@ -51,7 +51,7 @@ export class ProxyHandler {
 
     unmarshallTags(marshalledTags) {
         const tags = {};
-        for (var k in marshalledTags) {
+        for (let k in marshalledTags) {
             const value = marshalledTags[k];
             if (value) {
                 tags[k] = JSON.parse(value);
