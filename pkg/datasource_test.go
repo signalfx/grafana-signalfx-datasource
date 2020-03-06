@@ -1,3 +1,4 @@
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 package main
 
 import (
@@ -38,13 +39,13 @@ func (m *signalflowJob) Program() string {
 	return args.String(0)
 }
 
-func TestBuildURL(t *testing.T) {
+func TestBuildSignalflowURL(t *testing.T) {
 	// Given
 	ds := &SignalFxDatasource{}
 	dsInfo := &datasource.DatasourceInfo{}
 	dsInfo.Url = "https://stream.us1.signalfx.com"
 	// When
-	url, _ := ds.buildURL(dsInfo)
+	url, _ := ds.buildSignalflowURL(dsInfo)
 	// Then
 	assert.NotNil(t, url)
 	assert.Equal(t, "wss://stream.us1.signalfx.com/v2/signalflow", url)

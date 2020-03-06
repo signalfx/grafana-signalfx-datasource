@@ -3,7 +3,7 @@
 System.register([], function (_export, _context) {
     "use strict";
 
-    var SignalFxConfigCtrl;
+    var _createClass, SignalFxConfigCtrl;
 
     function _classCallCheck(instance, Constructor) {
         if (!(instance instanceof Constructor)) {
@@ -14,11 +14,50 @@ System.register([], function (_export, _context) {
     return {
         setters: [],
         execute: function () {
-            _export('SignalFxConfigCtrl', SignalFxConfigCtrl = function SignalFxConfigCtrl($scope) {
-                _classCallCheck(this, SignalFxConfigCtrl);
+            _createClass = function () {
+                function defineProperties(target, props) {
+                    for (var i = 0; i < props.length; i++) {
+                        var descriptor = props[i];
+                        descriptor.enumerable = descriptor.enumerable || false;
+                        descriptor.configurable = true;
+                        if ("value" in descriptor) descriptor.writable = true;
+                        Object.defineProperty(target, descriptor.key, descriptor);
+                    }
+                }
 
-                this.current.access = 'direct';
-            });
+                return function (Constructor, protoProps, staticProps) {
+                    if (protoProps) defineProperties(Constructor.prototype, protoProps);
+                    if (staticProps) defineProperties(Constructor, staticProps);
+                    return Constructor;
+                };
+            }();
+
+            _export('SignalFxConfigCtrl', SignalFxConfigCtrl = function () {
+                function SignalFxConfigCtrl($scope) {
+                    _classCallCheck(this, SignalFxConfigCtrl);
+
+                    this.current.access = this.current.access || 'direct';
+                    this.accessTypes = [{ name: 'Browser', value: 'direct' }, { name: 'Server', value: 'proxy' }];
+                }
+
+                _createClass(SignalFxConfigCtrl, [{
+                    key: 'onTokenReset',
+                    value: function onTokenReset($event) {
+                        $event.preventDefault();
+                        this.current.secureJsonFields.accessToken = false;
+                        this.current.secureJsonData = this.current.secureJsonData || {};
+                    }
+                }, {
+                    key: 'onAccessChange',
+                    value: function onAccessChange() {
+                        if (this.current.access === 'proxy') {
+                            this.current.jsonData.accessToken = null;
+                        }
+                    }
+                }]);
+
+                return SignalFxConfigCtrl;
+            }());
 
             _export('SignalFxConfigCtrl', SignalFxConfigCtrl);
 

@@ -1,6 +1,6 @@
-// Copyright (C) 2019 SignalFx, Inc. All rights reserved.
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 import _ from "lodash";
-import {QueryCtrl} from 'app/plugins/sdk';
+import { QueryCtrl } from 'app/plugins/sdk';
 
 class SignalFxQueryCtrl extends QueryCtrl {
     constructor($scope, $injector) {
@@ -14,9 +14,9 @@ class SignalFxQueryCtrl extends QueryCtrl {
     }
 
     onDataError(err) {
-       this.lastError = err.replace(/(?:\r\n|\r|\n)/g, '<br>');;
+        this.lastError = err.replace(/(?:\r\n|\r|\n)/g, '<br>');;
     }
 }
 
 SignalFxQueryCtrl.templateUrl = 'partials/query.editor.html';
-export {SignalFxQueryCtrl};
+export { SignalFxQueryCtrl };

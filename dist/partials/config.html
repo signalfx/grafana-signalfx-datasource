@@ -4,13 +4,38 @@
     <div class="gf-form-inline">
         <div class="gf-form">
             <span class="gf-form-label width-10">Endpoint</span>
-            <input type="text" class="gf-form-input width-30" ng-model='ctrl.current.url' placeholder="https://stream.signalfx.com" bs-typeahead="{{['https://stream.signalfx.com', 'https://stream.us0.signalfx.com', 'https://stream.us1.signalfx.com', 'https://stream.us2.signalfx.com', 'https://stream.eu0.signalfx.com']}}" required></input>
+            <input type="text" class="gf-form-input width-30" ng-model='ctrl.current.url'
+                placeholder="https://stream.signalfx.com"
+                bs-typeahead="{{['https://stream.signalfx.com', 'https://stream.us0.signalfx.com', 'https://stream.us1.signalfx.com', 'https://stream.us2.signalfx.com', 'https://stream.eu0.signalfx.com', 'https://stream.ap0.signalfx.com']}}"
+                ng-pattern="/^(http|https):\/\/(\w+:{0,1}\w*@)?(\S+)(:[0-9]+)?(\/|\/([\w#!:.?+=&%@!\-\/]))?$/"
+                required></input>
         </div>
     </div>
     <div class="gf-form-inline">
         <div class="gf-form">
+            <span class="gf-form-label width-10">Access</span>
+            <div class="gf-form-select-wrapper max-width-24">
+                <select class="gf-form-input" ng-model="ctrl.current.access" ng-change="ctrl.onAccessChange()"
+                    ng-options="f.key as f.value for f in [{ key: 'direct', value: 'Browser'}, {key: 'proxy', value: 'Server'}]"></select>
+            </div>
+        </div>
+    </div>
+    <div class="gf-form-inline" ng-if="ctrl.current.access === 'direct'">
+        <div class="gf-form">
             <span class="gf-form-label width-10">Access Token</span>
-            <input type="text" class="gf-form-input width-30" ng-model='ctrl.current.jsonData.accessToken' placeholder="" required></input>
+            <input type="text" class="gf-form-input width-30" ng-model='ctrl.current.jsonData.accessToken'
+                placeholder="" required></input>
+        </div>
+    </div>
+    <div class="gf-form-inline" ng-if="ctrl.current.access === 'proxy'">
+        <div class="gf-form">
+            <span class="gf-form-label width-10">Secure Access Token</span>
+            <input type="text" disabled="true" class="gf-form-input width-30" value="Configured"
+                ng-show="ctrl.current.secureJsonFields.accessToken"></input>
+            <button class="btn btn-secondary gf-form-btn" ng-show="ctrl.current.secureJsonFields.accessToken"
+                ng-click="ctrl.onTokenReset($event)">reset</button>
+            <input type="text" class="gf-form-input width-30" ng-model='ctrl.current.secureJsonData.accessToken'
+                placeholder="" ng-hide="ctrl.current.secureJsonFields.accessToken" required></input>
         </div>
     </div>
 </div>

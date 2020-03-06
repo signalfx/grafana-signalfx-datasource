@@ -1,3 +1,4 @@
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 package main
 
 import (
@@ -275,15 +276,22 @@ func TestReadDataMessage(t *testing.T) {
 	computation.On("Data").Return(modifyData(data))
 	computation.On("MaxDelay").Return(time.Second)
 	computation.On("Resolution").Return(time.Second)
+	customProperties := make(map[string]string)
+	customProperties["metric_source"] = "kubernetes"
+	internalProperties := make(map[string]interface{})
+	internalProperties["sf_key"] = []string{"kubernetes_node", "sf_originatingMetric", "sf_metric", "computationId"}
+	internalProperties["sf_streamLabel"] = "D"
 	metadata := messages.MetadataProperties{
-		Metric: "metric_name",
+		Metric:             "metric_name",
+		CustomProperties:   customProperties,
+		InternalProperties: internalProperties,
 	}
 	tsid := idtool.ID(123)
 	computation.On("TSIDMetadata", mock.Anything).Return(&metadata)
 	message := &messages.DataMessage{}
 	message.TimestampMillis = uint64(handler.stopTime.UnixNano() / int64(time.Millisecond))
-	message.Payloads = make([]messages.BinaryPayload, 1)
-	message.Payloads[0] = messages.BinaryPayload{
+	message.Payloads = make([]messages.DataPayload, 1)
+	message.Payloads[0] = messages.DataPayload{
 		Type: 1,
 		TSID: tsid,
 	}
@@ -295,6 +303,11 @@ func TestReadDataMessage(t *testing.T) {
 	assert.Equal(t, 1, len(c))
 	assert.Equal(t, metadata.Metric, c[0].Name)
 	assert.Equal(t, 1, len(c[0].Points))
+	expectedTags := make(map[string]string)
+	expectedTags["sf_streamLabel"] = "\"D\""
+	expectedTags["metric_source"] = "\"kubernetes\""
+	expectedTags["sf_key"] = "[\"kubernetes_node\",\"sf_originatingMetric\",\"sf_metric\",\"computationId\"]"
+	assert.Equal(t, expectedTags, c[0].Tags)
 }
 
 func modifyDone(ch chan struct{}) <-chan struct{} {

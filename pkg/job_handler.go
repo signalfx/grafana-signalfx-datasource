@@ -1,6 +1,8 @@
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 package main
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/grafana/grafana_plugin_model/go/datasource"
@@ -42,6 +44,7 @@ type SignalFxJobHandler struct {
 	startTime   time.Time
 	stopTime    time.Time
 	cutoffTime  time.Time
+	maxDelay    int64
 	unbounded   bool
 	lastUsed    time.Time
 	Points      map[int64]([]*datasource.Point)
@@ -49,7 +52,7 @@ type SignalFxJobHandler struct {
 }
 
 const streamingThresholdTimeout = 2 * time.Minute
-const maxDatapointsToKeepBeforeTimerange = 1
+const maxDatapointsToKeepBeforeTimerange = 10
 const inactiveJobTimeout = 6 * time.Minute
 
 func (t *SignalFxJobHandler) start(target *Target) (<-chan []*datasource.TimeSeries, error) {
@@ -72,6 +75,7 @@ func (t *SignalFxJobHandler) initialize(target *Target) {
 	t.program = target.Program
 	t.initializeTimeRange(target)
 	t.interval = target.Interval
+	t.maxDelay = target.MaxDelay
 	t.unbounded = target.StopTime.After(time.Now().Add(-streamingThresholdTimeout))
 }
 
@@ -100,11 +104,14 @@ func (t *SignalFxJobHandler) execute() (*signalflow.Computation, error) {
 	if t.interval > 0 {
 		request.Resolution = t.interval
 	}
+	if t.maxDelay > 0 {
+		request.MaxDelayMs = t.maxDelay
+	}
 	if !t.unbounded {
 		request.Stop = t.stopTime
 		request.Immediate = true
 	}
-	t.logger.Debug("Starting job", "program", t.program)
+	t.logger.Debug("Starting job", "program", t.program, "maxDelay", t.maxDelay)
 	return t.client.Execute(request)
 }
 
@@ -124,6 +131,7 @@ func (t *SignalFxJobHandler) reuse(target *Target) <-chan []*datasource.TimeSeri
 func (t *SignalFxJobHandler) isJobReusable(target *Target) bool {
 	return t.program == target.Program &&
 		t.interval == target.Interval &&
+		t.maxDelay == target.MaxDelay &&
 		!t.startTime.After(target.StartTime) &&
 		((t.computation != nil && !t.computation.IsFinished() && t.unbounded) ||
 			!t.stopTime.Before(target.StopTime))
@@ -153,25 +161,27 @@ func (t *SignalFxJobHandler) readDataMessages() {
 }
 
 func (t *SignalFxJobHandler) handleDataMessage(m *messages.DataMessage) bool {
-	timestamp := time.Unix(0, int64(m.TimestampMillis)*int64(time.Millisecond))
-	for _, pl := range m.Payloads {
-		tsid := int64(pl.TSID)
-		value := pl.Value()
-		if (t.Points[tsid]) == nil {
-			t.Points[tsid] = make([]*datasource.Point, 0)
+	if m != nil {
+		timestamp := time.Unix(0, int64(m.TimestampMillis)*int64(time.Millisecond))
+		for _, pl := range m.Payloads {
+			tsid := int64(pl.TSID)
+			value := pl.Value()
+			if (t.Points[tsid]) == nil {
+				t.Points[tsid] = make([]*datasource.Point, 0)
+			}
+			t.Points[tsid] = append(t.Points[tsid], &datasource.Point{
+				Timestamp: timestamp.UnixNano() / int64(time.Millisecond),
+				Value:     toFloat64(value),
+			})
 		}
-		t.Points[tsid] = append(t.Points[tsid], &datasource.Point{
-			Timestamp: timestamp.UnixNano() / int64(time.Millisecond),
-			Value:     toFloat64(value),
-		})
-	}
-	resolution := t.computation.Resolution()
-	if resolution > 0 {
-		maxDelay := t.computation.MaxDelay()
-		// Estimate the timestamp of the last datapoint already available in the system
-		nextEstimatedTimestamp := timestamp.Add(2*resolution - 1).Add(maxDelay).Truncate(resolution)
-		roundedCutoffTime := t.cutoffTime.Truncate(resolution)
-		return nextEstimatedTimestamp.After(roundedCutoffTime)
+		resolution := t.computation.Resolution()
+		if resolution > 0 {
+			maxDelay := t.computation.MaxDelay()
+			// Estimate the timestamp of the last datapoint already available in the system
+			nextEstimatedTimestamp := timestamp.Add(2*resolution - 1).Add(maxDelay).Truncate(resolution)
+			roundedCutoffTime := t.cutoffTime.Truncate(resolution)
+			return nextEstimatedTimestamp.After(roundedCutoffTime)
+		}
 	}
 	return false
 }
@@ -206,7 +216,7 @@ func (t *SignalFxJobHandler) flushData(out chan []*datasource.TimeSeries) {
 func (t *SignalFxJobHandler) convertToTimeseries() []*datasource.TimeSeries {
 	series := make([]*datasource.TimeSeries, 0)
 	for id, points := range t.Points {
-		s := &datasource.TimeSeries{Name: t.getTimeSeriesName(idtool.ID(id)), Points: points}
+		s := &datasource.TimeSeries{Name: t.getTimeSeriesName(idtool.ID(id)), Points: points, Tags: t.getTags(idtool.ID(id))}
 		series = append(series, s)
 	}
 	return series
@@ -223,6 +233,32 @@ func (t *SignalFxJobHandler) getTimeSeriesName(tsid idtool.ID) string {
 		}
 	}
 	return "series_name"
+}
+
+func (t *SignalFxJobHandler) getTags(tsid idtool.ID) map[string]string {
+	tags := make(map[string]string)
+	if t.computation != nil {
+		meta := t.computation.TSIDMetadata(tsid)
+		if meta != nil {
+			for tagName, tagValue := range meta.CustomProperties {
+				jsonValue, err := json.Marshal(tagValue)
+				if err != nil {
+					t.logger.Error("Could not marshal tag value", "value", tagValue, "error", err)
+					continue
+				}
+				tags[tagName] = string(jsonValue)
+			}
+			for tagName, tagValue := range meta.InternalProperties {
+				jsonValue, err := json.Marshal(tagValue)
+				if err != nil {
+					t.logger.Error("Could not marshal tag value", "value", tagValue, "error", err)
+					continue
+				}
+				tags[tagName] = string(jsonValue)
+			}
+		}
+	}
+	return tags
 }
 
 func (t *SignalFxJobHandler) trimDatapoints() {

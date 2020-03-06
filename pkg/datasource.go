@@ -1,7 +1,9 @@
+// Copyright (C) 2019-2020 Splunk, Inc. All rights reserved.
 package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"sync"
 	"time"
@@ -22,10 +24,11 @@ type SignalFxDatasource struct {
 	token        string
 	handlerMutex sync.Mutex
 	clientMutex  sync.Mutex
+	apiClient    *SignalFxApiClient
 }
 
 type DatasourceInfo struct {
-	AccessToken string
+	AccessToken string `json:"accessToken"`
 }
 
 type Target struct {
@@ -35,7 +38,7 @@ type Target struct {
 	StopTime  time.Time     `json:"-"`
 	Interval  time.Duration `json:"-"`
 	Alias     string        `json:"alias"`
-	MaxDelay  int32         `json:"maxDelay"`
+	MaxDelay  int64         `json:"maxDelay"`
 }
 
 func NewSignalFxDatasource() *SignalFxDatasource {
@@ -44,6 +47,7 @@ func NewSignalFxDatasource() *SignalFxDatasource {
 		handlers:     make([]SignalFxJob, 0),
 		clientMutex:  sync.Mutex{},
 		handlerMutex: sync.Mutex{},
+		apiClient:    NewSignalFxApiClient(pluginLogger),
 	}
 	tick := time.NewTicker(time.Second * 30)
 	go datasource.cleanup(tick)
@@ -54,7 +58,76 @@ func (t *SignalFxDatasource) Query(ctx context.Context, tsdbReq *datasource.Data
 
 	t.logger.Debug("Running query", "req", tsdbReq)
 
-	err := t.createClient(tsdbReq.Datasource)
+	var apiCall SignalFxApiCall
+	if err := json.Unmarshal([]byte(tsdbReq.Queries[0].ModelJson), &apiCall); err != nil {
+		t.logger.Error("Could not unmarshal query", "error", err)
+		return nil, err
+	}
+
+	switch apiCall.Path {
+	case "/v2/metric":
+		apiCall.Method = http.MethodGet
+		return t.getMetrics(tsdbReq, &apiCall)
+	case "/v2/suggest/_signalflowsuggest":
+		apiCall.Method = http.MethodPost
+		return t.getSuggestions(tsdbReq, &apiCall)
+	}
+
+	return t.getDatapoints(tsdbReq)
+}
+
+func (t *SignalFxDatasource) getMetrics(tsdbReq *datasource.DatasourceRequest, apiCall *SignalFxApiCall) (*datasource.DatasourceResponse, error) {
+	response := MetricResponse{}
+	t.makeAPICall(tsdbReq, apiCall, &response)
+	t.logger.Debug("Unmarshalled API response", "response", response)
+	values := make([]string, 0)
+	for _, r := range response.Results {
+		values = append(values, r.Name)
+	}
+	return t.formatAsTable(values), nil
+}
+
+func (t *SignalFxDatasource) getSuggestions(tsdbReq *datasource.DatasourceRequest, apiCall *SignalFxApiCall) (*datasource.DatasourceResponse, error) {
+	response := make([]string, 0)
+	t.makeAPICall(tsdbReq, apiCall, &response)
+	t.logger.Debug("Unmarshalled API response", "response", response)
+	return t.formatAsTable(response), nil
+}
+
+func (t *SignalFxDatasource) formatAsTable(values []string) *datasource.DatasourceResponse {
+	table := &datasource.Table{
+		Columns: make([]*datasource.TableColumn, 0),
+		Rows:    make([]*datasource.TableRow, 0),
+	}
+	table.Columns = append(table.Columns, &datasource.TableColumn{Name: "name"})
+	for _, r := range values {
+		row := &datasource.TableRow{}
+		row.Values = append(row.Values, &datasource.RowValue{Kind: datasource.RowValue_TYPE_STRING, StringValue: r})
+		table.Rows = append(table.Rows, row)
+	}
+	return &datasource.DatasourceResponse{
+		Results: []*datasource.QueryResult{
+			{
+				RefId:  "items",
+				Tables: []*datasource.Table{table},
+			},
+		},
+	}
+}
+
+func (t *SignalFxDatasource) makeAPICall(tsdbReq *datasource.DatasourceRequest, apiCall *SignalFxApiCall, response interface{}) error {
+	apiCall.BaseURL = tsdbReq.Datasource.Url
+	t.logger.Debug("Making API Call", "call", apiCall)
+	dsInfo, err := t.getDsInfo(tsdbReq.Datasource)
+	if err != nil {
+		return err
+	}
+	apiCall.Token = dsInfo.AccessToken
+	return t.apiClient.doRequest(apiCall, &response)
+}
+
+func (t *SignalFxDatasource) getDatapoints(tsdbReq *datasource.DatasourceRequest) (*datasource.DatasourceResponse, error) {
+	err := t.createSignalflowClient(tsdbReq.Datasource)
 	if err != nil {
 		t.logger.Error("Could not create SignalFlow client", "error", err)
 		return nil, err
@@ -83,9 +156,9 @@ func (t *SignalFxDatasource) Query(ctx context.Context, tsdbReq *datasource.Data
 	return response, nil
 }
 
-func (t *SignalFxDatasource) createClient(datasource *datasource.DatasourceInfo) error {
+func (t *SignalFxDatasource) createSignalflowClient(datasource *datasource.DatasourceInfo) error {
 
-	url, err := t.buildURL(datasource)
+	url, err := t.buildSignalflowURL(datasource)
 	if err != nil {
 		return err
 	}
@@ -121,7 +194,7 @@ func (t *SignalFxDatasource) createClient(datasource *datasource.DatasourceInfo)
 	return nil
 }
 
-func (t *SignalFxDatasource) buildURL(datasourceInfo *datasource.DatasourceInfo) (string, error) {
+func (t *SignalFxDatasource) buildSignalflowURL(datasourceInfo *datasource.DatasourceInfo) (string, error) {
 	sfxURL, err := url.Parse(datasourceInfo.Url)
 	if err != nil {
 		return "", err
@@ -135,8 +208,12 @@ func (t *SignalFxDatasource) buildURL(datasourceInfo *datasource.DatasourceInfo)
 
 func (t *SignalFxDatasource) getDsInfo(datasourceInfo *datasource.DatasourceInfo) (*DatasourceInfo, error) {
 	var dsInfo DatasourceInfo
-	if err := json.Unmarshal([]byte(datasourceInfo.JsonData), &dsInfo); err != nil {
-		return nil, err
+	if val, ok := datasourceInfo.DecryptedSecureJsonData["accessToken"]; ok {
+		dsInfo.AccessToken = val
+	} else {
+		if err := json.Unmarshal([]byte(datasourceInfo.JsonData), &dsInfo); err != nil {
+			return nil, err
+		}
 	}
 	return &dsInfo, nil
 }
@@ -169,6 +246,7 @@ func (t *SignalFxDatasource) buildTargets(tsdbReq *datasource.DatasourceRequest)
 	targets := make([]Target, 0)
 	for _, query := range tsdbReq.Queries {
 		target := Target{}
+		target.MaxDelay = 0
 		if err := json.Unmarshal([]byte(query.ModelJson), &target); err != nil {
 			return nil, err
 		}
