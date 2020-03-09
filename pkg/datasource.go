@@ -32,13 +32,14 @@ type DatasourceInfo struct {
 }
 
 type Target struct {
-	RefID     string        `json:"refId"`
-	Program   string        `json:"program"`
-	StartTime time.Time     `json:"-"`
-	StopTime  time.Time     `json:"-"`
-	Interval  time.Duration `json:"-"`
-	Alias     string        `json:"alias"`
-	MaxDelay  int64         `json:"maxDelay"`
+	RefID         string        `json:"refId"`
+	Program       string        `json:"program"`
+	StartTime     time.Time     `json:"-"`
+	StopTime      time.Time     `json:"-"`
+	Interval      time.Duration `json:"-"`
+	Alias         string        `json:"alias"`
+	MaxDelay      int64         `json:"maxDelay"`
+	MinResolution int64         `json:"minResolution"`
 }
 
 func NewSignalFxDatasource() *SignalFxDatasource {
@@ -247,10 +248,15 @@ func (t *SignalFxDatasource) buildTargets(tsdbReq *datasource.DatasourceRequest)
 	for _, query := range tsdbReq.Queries {
 		target := Target{}
 		target.MaxDelay = 0
+		target.MinResolution = 0
 		if err := json.Unmarshal([]byte(query.ModelJson), &target); err != nil {
 			return nil, err
 		}
-		target.Interval = time.Duration(query.IntervalMs) * time.Millisecond
+		var intervalMs = query.IntervalMs
+		if intervalMs < target.MinResolution {
+			intervalMs = target.MinResolution
+		}
+		target.Interval = time.Duration(intervalMs) * time.Millisecond
 		target.StartTime = startTime
 		target.StopTime = stopTime
 		targets = append(targets, target)
