@@ -1,6 +1,5 @@
-
 <query-editor-row query-ctrl="ctrl" can-collapse="true" has-text-edit-mode="true">
-  <div>
+  	<div>
 		<div class="gf-form">
 			<textarea 
 				rows="3"
@@ -13,29 +12,42 @@
 			</textarea>
 		</div>
 	</div>
-	<div class="gf-form max-width-25">
-		<label class="gf-form-label query-keyword">ALIAS BY</label>
-		<input
-			type="text"
-			class="gf-form-input"
-			ng-model="ctrl.target.alias"
-			spellcheck="false"
-			placeholder="Naming pattern"
-			ng-blur="ctrl.refresh()"
-		/>
+	<div class="gf-form-inline ">
+		<div class="gf-form max-width-30">
+			<label class="gf-form-label query-keyword">ALIAS BY</label>
+			<input
+				type="text"
+				class="gf-form-input"
+				ng-model="ctrl.target.alias"
+				spellcheck="false"
+				placeholder="Naming pattern"
+				ng-blur="ctrl.refresh()"
+			/>
+		</div>
+		<div class="gf-form max-width-30">
+			<label class="gf-form-label query-keyword">MAX DELAY</label>
+			<input
+				type="number"
+				class="gf-form-input"
+				ng-model="ctrl.target.maxDelay"
+				spellcheck="false"
+				placeholder="Max delay in milliseconds"
+				ng-blur="ctrl.refresh()"
+			/>
+		</div>
+		<div class="gf-form max-width-30">
+			<label class="gf-form-label query-keyword">MIN RESOLUTION</label>
+			<input
+				type="number"
+				class="gf-form-input"
+				ng-model="ctrl.target.minResolution"
+				spellcheck="false"
+				placeholder="Min interval between datapoints in milliseconds"
+				ng-blur="ctrl.refresh()"
+			/>
+		</div>
 	</div>
-	<div class="gf-form max-width-25">
-		<label class="gf-form-label query-keyword">MAX DELAY</label>
-		<input
-			type="number"
-			class="gf-form-input"
-			ng-model="ctrl.target.maxDelay"
-			spellcheck="false"
-			placeholder="Max delay in milliseconds"
-			ng-blur="ctrl.refresh()"
-		/>
-	</div>
-  <div class="gf-form" ng-show="ctrl.lastError">
-    <pre class="gf-form-pre alert alert-error">{{ctrl.lastError}}</pre>
+  	<div class="gf-form" ng-show="ctrl.lastError">
+    	<pre class="gf-form-pre alert alert-error">{{ctrl.lastError}}</pre>
 	</div>
 </query-editor-row>

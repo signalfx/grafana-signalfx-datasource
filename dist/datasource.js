@@ -83,6 +83,8 @@ System.register(['lodash', './signalfx', './stream_handler', './proxy_handler'],
                         });
                         var program = queries.join('\n');
 
+                        var mutableOptions = _.clone(options);
+                        mutableOptions.intervalMs = this.getMinResolution(options);
                         var aliases = this.collectAliases(options);
                         var maxDelay = this.getMaxDelay(options);
 
@@ -90,7 +92,7 @@ System.register(['lodash', './signalfx', './stream_handler', './proxy_handler'],
                         if (!program) {
                             return Promise.resolve({ data: [] });
                         }
-                        return this.getSignalflowHandler(options).start(program, aliases, maxDelay, options);
+                        return this.getSignalflowHandler(options).start(program, aliases, maxDelay, mutableOptions);
                     }
                 }, {
                     key: 'collectAliases',
@@ -127,6 +129,15 @@ System.register(['lodash', './signalfx', './stream_handler', './proxy_handler'],
                         }));
                         if (!maxDelay) maxDelay = 0;
                         return maxDelay;
+                    }
+                }, {
+                    key: 'getMinResolution',
+                    value: function getMinResolution(options) {
+                        var minResolution = _.max(_.map(options.targets, function (t) {
+                            return t.minResolution;
+                        }));
+                        if (!minResolution) minResolution = 0;
+                        return Math.max(options.intervalMs, minResolution);
                     }
                 }, {
                     key: 'getSignalflowHandler',

@@ -21,7 +21,7 @@ export class SignalFxDatasource {
             this.proxyAccess = true;
         } else {
             this.headers['X-SF-TOKEN'] = this.authToken;
-            this.endpoint = instanceSettings.url.replace(/^(http)(s)?:/, function(match, p1, p2) {
+            this.endpoint = instanceSettings.url.replace(/^(http)(s)?:/, function (match, p1, p2) {
                 return 'ws' + (p2 || '') + ':';
             });
             console.log('Using SignalFx at ' + this.endpoint);
@@ -39,6 +39,8 @@ export class SignalFxDatasource {
             .map(t => this.templateSrv.replace(t.program, options.scopedVars, this.interpolateQueryStr));
         const program = queries.join('\n');
 
+        const mutableOptions = _.clone(options)
+        mutableOptions.intervalMs = this.getMinResolution(options);
         const aliases = this.collectAliases(options);
         const maxDelay = this.getMaxDelay(options);
 
@@ -46,7 +48,7 @@ export class SignalFxDatasource {
         if (!program) {
             return Promise.resolve({ data: [] });
         }
-        return this.getSignalflowHandler(options).start(program, aliases, maxDelay, options);
+        return this.getSignalflowHandler(options).start(program, aliases, maxDelay, mutableOptions);
     }
 
     collectAliases(options) {
@@ -73,6 +75,13 @@ export class SignalFxDatasource {
         if (!maxDelay)
             maxDelay = 0;
         return maxDelay;
+    }
+
+    getMinResolution(options) {
+        let minResolution = _.max(_.map(options.targets, t => t.minResolution));
+        if (!minResolution)
+            minResolution = 0;
+        return Math.max(options.intervalMs, minResolution);
     }
 
     getSignalflowHandler(options) {
