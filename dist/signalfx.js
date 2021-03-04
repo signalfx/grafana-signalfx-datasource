@@ -2612,19 +2612,19 @@ send_tree(s,s.dyn_dtree,dcodes-1);/* distance tree *///Tracev((stderr, "\ndist t
    * Check if the data type is TEXT or BINARY, using the following algorithm:
    * - TEXT if the two conditions below are satisfied:
    *    a) There are no non-portable control characters belonging to the
-   *       "black list" (0..6, 14..25, 28..31).
+   *       "reject list" (0..6, 14..25, 28..31).
    *    b) There is at least one printable character belonging to the
-   *       "white list" (9 {TAB}, 10 {LF}, 13 {CR}, 32..255).
+   *       "accept list" (9 {TAB}, 10 {LF}, 13 {CR}, 32..255).
    * - BINARY otherwise.
    * - The following partially-portable control characters form a
    *   "gray list" that is ignored in this detection algorithm:
    *   (7 {BEL}, 8 {BS}, 11 {VT}, 12 {FF}, 26 {SUB}, 27 {ESC}).
    * IN assertion: the fields Freq of dyn_ltree are set.
-   */function detect_data_type(s){/* black_mask is the bit mask of black-listed bytes
+   */function detect_data_type(s){/* reject_mask is the bit mask of reject-listed bytes
      * set bits 0..6, 14..25, and 28..31
      * 0xf3ffc07f = binary 11110011111111111100000001111111
-     */var black_mask=0xf3ffc07f;var n;/* Check for non-textual ("black-listed") bytes. */for(n=0;n<=31;n++,black_mask>>>=1){if(black_mask&1&&s.dyn_ltree[n*2]/*.Freq*/!==0){return Z_BINARY;}}/* Check for textual ("white-listed") bytes. */if(s.dyn_ltree[9*2]/*.Freq*/!==0||s.dyn_ltree[10*2]/*.Freq*/!==0||s.dyn_ltree[13*2]/*.Freq*/!==0){return Z_TEXT;}for(n=32;n<LITERALS;n++){if(s.dyn_ltree[n*2]/*.Freq*/!==0){return Z_TEXT;}}/* There are no "black-listed" or "white-listed" bytes:
-     * this stream either is empty or has tolerated ("gray-listed") bytes only.
+     */var reject_mask=0xf3ffc07f;var n;/* Check for non-textual ("reject-listed") bytes. */for(n=0;n<=31;n++,reject_mask>>>=1){if(reject_mask&1&&s.dyn_ltree[n*2]/*.Freq*/!==0){return Z_BINARY;}}/* Check for textual ("accept-listed") bytes. */if(s.dyn_ltree[9*2]/*.Freq*/!==0||s.dyn_ltree[10*2]/*.Freq*/!==0||s.dyn_ltree[13*2]/*.Freq*/!==0){return Z_TEXT;}for(n=32;n<LITERALS;n++){if(s.dyn_ltree[n*2]/*.Freq*/!==0){return Z_TEXT;}}/* There are no "reject-listed" or "accept-listed" bytes:
+     * this stream either is empty or has tolerated bytes only.
      */return Z_BINARY;}var static_init_done=false;/* ===========================================================================
    * Initialize the tree data structures for a new zlib stream.
    */function _tr_init(s){if(!static_init_done){tr_static_init();static_init_done=true;}s.l_desc=new TreeDesc(s.dyn_ltree,static_l_desc);s.d_desc=new TreeDesc(s.dyn_dtree,static_d_desc);s.bl_desc=new TreeDesc(s.bl_tree,static_bl_desc);s.bi_buf=0;s.bi_valid=0;/* Initialize the first block of the first file: */init_block(s);}/* ===========================================================================
