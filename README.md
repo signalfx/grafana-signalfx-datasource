@@ -1,5 +1,11 @@
 # SignalFx Grafana Datasource Plugin Setup
 
+> # :warning: End of Support (EoS) Notice
+> **The SignalFx Grafana Datasource Plugin has reached End of Support.**
+>
+> Please contact Splunk Support with any migration questions.
+
+
 ## Installation
 
 Copy the ``dist`` directory into your grafana plugins directory. The default location is /var/lib/grafana/plugins/signalfx-datasource.
